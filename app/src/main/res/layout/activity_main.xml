@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#000000"
+    android:padding="16dp"
+    tools:context=".MainActivity">
+
+    <!-- Status Text -->
+    <TextView
+        android:id="@+id/statusText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Waiting for new photos..."
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:gravity="center"
+        android:paddingVertical="8dp" />
+
+    <!-- Resolution Text -->
+    <TextView
+        android:id="@+id/resolutionText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="No photo captured yet"
+        android:textColor="#CCCCCC"
+        android:textSize="14sp"
+        android:gravity="center"
+        android:paddingVertical="4dp" />
+
+    <!-- Photo Counter -->
+    <TextView
+        android:id="@+id/photoCountText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Photos captured: 0"
+        android:textColor="#AAAAAA"
+        android:textSize="12sp"
+        android:gravity="center"
+        android:paddingVertical="4dp" />
+
+    <!-- Image Display -->
+    <ImageView
+        android:id="@+id/imageView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="16dp"
+        android:scaleType="fitCenter"
+        android:background="#222222"
+        android:contentDescription="Captured photo"
+        android:adjustViewBounds="true" />
+
+</LinearLayout>
