@@ -87,8 +87,8 @@ function displayImagePreview(img) {
         
         if (!isMatch && !isRotated) {
             dimensionWarning = `
-                <p style="color: #f45c43; font-weight: 600; margin-top: 10px;">
-                    ⚠️ Warning: Dimension mismatch detected!<br>
+                <p style="color: #000; font-weight: 600; margin-top: 10px;">
+                    Warning: Dimension mismatch detected!<br>
                     Expected: ${expectedWidth} x ${expectedHeight}<br>
                     Got: ${img.width} x ${img.height}<br>
                     <span style="font-size: 0.9em;">This image may have been cropped or resized.</span>
@@ -96,8 +96,8 @@ function displayImagePreview(img) {
             `;
         } else if (isRotated) {
             dimensionWarning = `
-                <p style="color: #f09819; font-weight: 600; margin-top: 10px;">
-                    ⚠️ Image appears to be rotated!<br>
+                <p style="color: #000; font-weight: 600; margin-top: 10px;">
+                    Image appears to be rotated!<br>
                     Expected: ${expectedWidth} x ${expectedHeight}<br>
                     Got: ${img.width} x ${img.height} (swapped)<br>
                     <span style="font-size: 0.9em;">Verification may fail. Try rotating the image 90°.</span>
@@ -105,8 +105,8 @@ function displayImagePreview(img) {
             `;
         } else {
             dimensionWarning = `
-                <p style="color: #38ef7d; font-weight: 600; margin-top: 10px;">
-                    ✅ Dimensions match expected values!
+                <p style="color: #000; font-weight: 600; margin-top: 10px;">
+                    Dimensions match expected values!
                 </p>
             `;
         }
@@ -235,7 +235,7 @@ verifyBtn.addEventListener('click', async function() {
     
     if (!isExactMatch && !isRotated) {
         alert(
-            `⚠️ DIMENSION MISMATCH!\n\n` +
+            `DIMENSION MISMATCH!\n\n` +
             `Expected: ${originalPixelData.metadata.width} x ${originalPixelData.metadata.height}\n` +
             `Got: ${uploadedImage.width} x ${uploadedImage.height}\n\n` +
             `This image appears to be cropped, resized, or is not the original image.\n` +
@@ -243,7 +243,7 @@ verifyBtn.addEventListener('click', async function() {
         );
     } else if (isRotated) {
         alert(
-            `⚠️ IMAGE ROTATED!\n\n` +
+            `IMAGE ROTATED!\n\n` +
             `The image dimensions are swapped (rotated 90°).\n` +
             `Expected: ${originalPixelData.metadata.width} x ${originalPixelData.metadata.height}\n` +
             `Got: ${uploadedImage.width} x ${uploadedImage.height}\n\n` +
@@ -489,26 +489,22 @@ function displayVerificationResults(results) {
     
     if (results.matchPercentage >= 95) {
         resultClass = 'authentic';
-        resultText = '✅ IMAGE AUTHENTIC';
-        resultIcon = '🎉';
+        resultText = 'IMAGE AUTHENTIC';
     } else if (results.matchPercentage >= 80) {
         resultClass = 'modified';
-        resultText = '⚠️ IMAGE MODIFIED (Minor Changes)';
-        resultIcon = '⚡';
+        resultText = 'IMAGE MODIFIED (Minor Changes)';
     } else {
         resultClass = 'forged';
-        resultText = '❌ IMAGE VERIFICATION FAILED';
-        resultIcon = '🚫';
+        resultText = 'IMAGE VERIFICATION FAILED';
     }
     
     let dimensionWarning = '';
     if (!results.dimensionMatch) {
-        dimensionWarning = '<div style="margin-top: 15px; font-size: 0.9rem;">⚠️ Dimension mismatch detected - Image may be cropped</div>';
+        dimensionWarning = '<div style="margin-top: 15px; font-size: 0.9rem;">Dimension mismatch detected - Image may be cropped</div>';
     }
     
     resultCard.className = `result-card ${resultClass}`;
     resultCard.innerHTML = `
-        <div style="font-size: 3rem; margin-bottom: 15px;">${resultIcon}</div>
         <div>${resultText}</div>
         <div style="font-size: 2rem; margin-top: 15px;">${results.matchPercentage}% Match</div>
         ${dimensionWarning}
@@ -524,7 +520,7 @@ function displayVerificationResults(results) {
         let mismatchDetails = '';
         if (strand.sampleMismatches.length > 0) {
             mismatchDetails = `
-                <div style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 5px;">
+                <div style="margin-top: 15px; padding: 10px; background: #eee; border: 1px solid #000; border-radius: 0;">
                     <strong>Sample Mismatches:</strong>
                     ${strand.sampleMismatches.map(mm => `
                         <div style="margin: 5px 0; font-size: 0.85rem; font-family: monospace;">
@@ -538,7 +534,7 @@ function displayVerificationResults(results) {
         }
         
         strandDiv.innerHTML = `
-            <h4>${strand.isMatch ? '✅' : '❌'} Strand ${strand.id} (${strand.name})</h4>
+            <h4>${strand.isMatch ? 'MATCH' : 'MISMATCH'} - Strand ${strand.id} (${strand.name})</h4>
             <div class="strand-stats">
                 <div class="stat-item">
                     <div class="stat-label">Total Pixels</div>
@@ -546,11 +542,11 @@ function displayVerificationResults(results) {
                 </div>
                 <div class="stat-item">
                     <div class="stat-label">Matching</div>
-                    <div class="stat-value" style="color: #38ef7d;">${strand.matchingPixels}</div>
+                    <div class="stat-value" style="color: #000;">${strand.matchingPixels}</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-label">Mismatching</div>
-                    <div class="stat-value" style="color: #f45c43;">${strand.mismatchingPixels}</div>
+                    <div class="stat-value" style="color: #000;">${strand.mismatchingPixels}</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-label">Match %</div>

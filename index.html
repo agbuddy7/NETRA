@@ -7,20 +7,37 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Proof ProofKrypt</h1>
-            <p>Verify image authenticity using pixel strand fingerprinting</p>
-            <p>Instructions</p>
+    <nav class="navbar">
+        <div class="nav-brand">NETRA</div>
+        <div class="nav-links">
+            <span>Image Provenance System</span>
+        </div>
+    </nav>
+    
+    <header class="hero-section">
+        <div class="hero-slideshow">
+            <div class="slide" style="background-image: url('360_F_860114533_bKCXNpA3pDJ31OWczpXfGgMJ5VojMI7f.jpg')"></div>
+            <div class="slide" style="background-image: url('download.jpeg')"></div>
+            <div class="slide" style="background-image: url('360_F_1613299914_Rmt70GP5sWi6RYYH2utnT0S9Ug5AIuCT.jpg')"></div>
+        </div>
+        <div class="hero-content">
+            <h1>NETRA</h1>
+            <p class="subtitle">Advanced Image Authenticity Verification</p>
+            <p class="desc">Verify image integrity </p>
+        </div>
+    </header>
+
+    <main class="container">
+        <div class="instructions-panel">
+            <h3>Usage Guide</h3>
             <ol>
-                <li>Download the app from <a href="https://github.com/agbuddy7/proofKrypt/blob/main/app-debug.apk">here</a>.</li>
-                <li>Run the app and give permsissions.</li>
-                <li>After clicking the image it will generate a pixel strand file drop it here</li>
-                <li>File can be found in Android/data/myApplication/ (if you cant see anything in Android folder try to enable show hidden files)</li>
-                <li>For verification Dont change the image resolution(we are working on compressed images)  </li>
-                <li>If it says dimension not matching please rotate the image 90 degrees anti-clockwise</li>
+                <li>Download the mobile app from <a href="https://github.com/agbuddy7/proofKrypt/blob/main/app-debug.apk">GitHub</a>.</li>
+                <li>Capture an image using the app to generate a pixel strand file.</li>
+                <li>Transfer the file from <code>Android/data/myApplication/</code> to your PC.</li>
+                <li>Upload the Image and the Pixel Data file below.</li>
+                <li><strong>Note:</strong> Ensure the image resolution is unchanged. Rotate 90° anti-clockwise if dimensions mismatch.</li>
             </ol>
-        </header>
+        </div>
 
         <div class="upload-section">
             <div class="upload-card">
@@ -28,7 +45,7 @@
                 <div class="file-input-wrapper">
                     <input type="file" id="imageInput" accept="image/*">
                     <label for="imageInput" class="file-label">
-                        <span>📷 Choose Image</span>
+                        <span>Choose Image</span>
                     </label>
                     <span id="imageFileName" class="file-name"></span>
                 </div>
@@ -39,7 +56,7 @@
                 <div class="file-input-wrapper">
                     <input type="file" id="pixelDataInput" accept=".txt">
                     <label for="pixelDataInput" class="file-label">
-                        <span>📄 Choose Pixel Data File</span>
+                        <span>Choose Pixel Data File</span>
                     </label>
                     <span id="pixelFileName" class="file-name"></span>
                 </div>
@@ -48,7 +65,7 @@
 
         <div class="action-section">
             <button id="verifyBtn" class="verify-btn" disabled>
-                🔐 Verify Image Authenticity
+                Verify Image Authenticity
             </button>
         </div>
 
@@ -79,11 +96,14 @@
             </div>
         </div>
 
-        <footer>
-            <p>Image Provenance Verification System v1.0 | Captured by: agbuddy7</p>
-            <p>Current UTC Time: <span id="currentTime"></span></p>
-        </footer>
-    </div>
+    </main>
+
+    <footer class="main-footer">
+        <div class="footer-content">
+            <p>NETRA Verification System v2.0</p>
+            <p class="footer-sub">Captured by: agbuddy7 | <span id="currentTime"></span></p>
+        </div>
+    </footer>
 
     <script src="script.js"></script>
 </body>
