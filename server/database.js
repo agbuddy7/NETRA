@@ -1,5 +1,3 @@
-const sqlite3 = require('sqlite3').verbose();
-const { Client } = require('pg');
 const path = require('path');
 
 let dbType = 'sqlite';
@@ -10,6 +8,9 @@ let pgClient;
 if (process.env.DATABASE_URL) {
     dbType = 'postgres';
     console.log("Using PostgreSQL Database (Render/Production)");
+    
+    // Lazy load pg
+    const { Client } = require('pg');
     
     pgClient = new Client({
         connectionString: process.env.DATABASE_URL,
@@ -27,6 +28,9 @@ if (process.env.DATABASE_URL) {
     // Fallback to SQLite (Local)
     dbType = 'sqlite';
     console.log("Using SQLite Database (Local Development)");
+    
+    // Lazy load sqlite3
+    const sqlite3 = require('sqlite3').verbose();
     
     const dbPath = path.resolve(__dirname, 'proofkrypt.db');
     sqliteDb = new sqlite3.Database(dbPath, (err) => {
