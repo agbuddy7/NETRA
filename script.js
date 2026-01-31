@@ -352,8 +352,8 @@ if(searchDbBtn) {
         progressText.textContent = 'Querying Global Authenticity Database...';
 
         try {
-            // Assume backend is on localhost:3000
-            const response = await fetch('http://localhost:3000/verify', {
+            // Using Render Deployment URL
+            const response = await fetch('https://netra-1.onrender.com/verify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ signature })
@@ -386,7 +386,7 @@ if(registerDbBtn) {
         const signature = extractConstellation(ctx, canvas.width, canvas.height);
 
         try {
-            const res = await fetch('http://localhost:3000/register', {
+            const res = await fetch('https://netra-1.onrender.com/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

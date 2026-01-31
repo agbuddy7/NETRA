@@ -685,16 +685,15 @@ public class MainActivity extends AppCompatActivity {
     private void sendSignatureToDatabase(long imageId, String constellationJson) {
         new Thread(() -> {
             try {
-                // IMPORTANT: 10.0.2.2 accesses 'localhost' from Android Emulator
-                // If running on a REAL Device, change this to your PC's IP address (e.g., 192.168.1.5)
-                java.net.URL url = new java.net.URL("http://10.0.2.2:3000/register"); 
+                // CHANGED: Using Render Deployment URL
+                java.net.URL url = new java.net.URL("https://netra-1.onrender.com/register");
                 
                 java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json; utf-8");
                 conn.setRequestProperty("Accept", "application/json");
                 conn.setDoOutput(true);
-                conn.setConnectTimeout(5000);
+                conn.setConnectTimeout(10000); // Increased timeout for cloud
 
                 String jsonInputString = String.format(
                     "{\"image_id\": \"%d\", \"author\": \"%s\", \"device_model\": \"%s\", \"timestamp\": \"%s\", \"constellation\": %s}",
