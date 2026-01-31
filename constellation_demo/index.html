@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProofKrypt: Constellation Demo</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; background: #f0f2f5; }
+        h1, h2 { color: #1a73e8; }
+        .container { display: flex; gap: 20px; flex-wrap: wrap; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); flex: 1; min-width: 300px; }
+        
+        .preview-box { 
+            width: 100%; 
+            min-height: 200px; 
+            background: #eee; 
+            margin: 10px 0; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+            border-radius: 4px;
+        }
+        canvas { max-width: 100%; height: auto; }
+        
+        textarea { width: 100%; height: 100px; font-family: monospace; font-size: 11px; margin-top: 10px; }
+        button { background: #1a73e8; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 10px; }
+        button:hover { background: #1557b0; }
+        
+        .result-box { padding: 15px; border-radius: 4px; margin-top: 10px; font-weight: bold; text-align: center; }
+        .match { background: #e6fffa; color: #00b894; border: 1px solid #00b894; }
+        .fail { background: #fff5f5; color: #d63031; border: 1px solid #d63031; }
+        
+        .grid-info { font-size: 12px; color: #666; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+    <h1>✨ Geometric Constellation Demo</h1>
+    <p>This demo proves how "Relative Keypoints" (Constellations) survive compression and screenshots.</p>
+
+    <div class="container">
+        <!-- GENERATOR SECTION -->
+        <div class="card">
+            <h2>1. Generate Signature</h2>
+            <p class="grid-info">Upload the ORIGINAL image. The system will now find <strong>64 Keypoints (8x8 Grid)</strong> for higher precision.</p>
+            <input type="file" id="genInput" accept="image/*">
+            
+            <div class="preview-box">
+                <canvas id="genCanvas"></canvas>
+            </div>
+            
+            <h3>Generated Constellation File (JSON)</h3>
+            <textarea id="genOutput" readonly placeholder="Upload an image to generate data..."></textarea>
+            <button onclick="copyToClipboard()">Copy JSON</button>
+        </div>
+
+        <!-- VERIFIER SECTION -->
+        <div class="card">
+            <h2>2. Verify Image</h2>
+            <p class="grid-info">Upload a SCREENSHOT or COMPRESSED version of the same image to test.</p>
+            
+            <input type="file" id="verInput" accept="image/*">
+            <br><br>
+            <label>Paste JSON Signature here:</label>
+            <textarea id="verJsonInput" placeholder="Paste the JSON from the left side here..."></textarea>
+            
+            <div class="preview-box">
+                <canvas id="verCanvas"></canvas>
+            </div>
+            
+            <button onclick="runVerification()">Verify Now</button>
+            
+            <div id="resultDisplay" style="display:none;"></div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

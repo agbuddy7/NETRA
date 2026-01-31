@@ -29,17 +29,7 @@
         </div>
     </header>
 
-    <main class="container">
-        <div class="instructions-panel">
-            <h3>Usage Guide</h3>
-            <ol>
-                <li>Download the mobile app from <a href="https://github.com/agbuddy7/proofKrypt/blob/main/app-debug.apk">GitHub</a>.</li>
-                <li>Capture an image using the app to generate a pixel strand file.</li>
-                <li>Transfer the file from <code>Android/data/myApplication/</code> to your PC.</li>
-                <li>Upload the Image and the Pixel Data file below.</li>
-                <li><strong>Note:</strong> Ensure the image resolution is unchanged. Rotate 90° anti-clockwise if dimensions mismatch.</li>
-            </ol>
-        </div>
+
 
         <div class="upload-section">
             <div class="upload-card">
@@ -54,10 +44,44 @@
             </div>
 
             <div class="upload-card">
-                <h2>Step 2: Upload Pixel Strand File</h2>
+                <h2>Step 2: Upload Files</h2>
                 <div class="file-input-wrapper">
+                    <p><strong>1. Strict Verification (.txt)</strong></p>
                     <input type="file" id="pixelDataInput" accept=".txt">
                     <label for="pixelDataInput" class="file-label">
+                        <span>Choose Pixel File</span>
+                    </label>
+                    <span id="pixelFileName" class="file-name"></span>
+                </div>
+                
+                <div class="file-input-wrapper" style="margin-top: 15px;">
+                    <p><strong>2. Resilient Verification (.json)</strong><br><small>(For Screenshots/Compression)</small></p>
+                    <input type="file" id="constellationInput" accept=".json">
+                    <label for="constellationInput" class="file-label" style="background:#00b894;">
+                        <span>Choose Constellation</span>
+                    </label>
+                    <span id="constellFileName" class="file-name"></span>
+                </div>
+            </div>
+
+            <div class="upload-card" style="border: 2px solid #0984e3;">
+                <h2>Step 3: Global Search</h2>
+                <p>Verify this image against the global provenace database.</p>
+                <div class="file-input-wrapper" style="margin-top: 15px;">
+                    <button id="searchDbBtn" class="action-btn" style="background: #0984e3; width: 100%;" disabled>
+                        🌍 Search Database
+                    </button>
+                    <button id="registerDbBtn" class="action-btn" style="background: #6c5ce7; width: 100%; margin-top: 10px;" disabled>
+                        📝 Register to Database
+                    </button>
+                </div>
+            </div>
+
+                        <span>Choose Constellation</span>
+                    </label>
+                    <span id="constellFileName" class="file-name"></span>
+                </div>
+            </div>
                         <span>Choose Pixel Data File</span>
                     </label>
                     <span id="pixelFileName" class="file-name"></span>
