@@ -41,6 +41,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
@@ -95,6 +98,9 @@ public class MainActivity extends AppCompatActivity {
         queueProcessor = Executors.newSingleThreadExecutor();
 
         Log.d(TAG, "Image Provenance System - 3 Vertical Strands (Raw Pixel Data)");
+
+        // Debug network permissions and security policy
+        checkNetworkPermissions();
 
         startQueueProcessor();
         checkPermissionAndRegisterObserver();
@@ -684,25 +690,35 @@ public class MainActivity extends AppCompatActivity {
 
     private void sendSignatureToDatabase(long imageId, String constellationJson) {
         new Thread(() -> {
+            // First test basic connectivity
+            testNetworkConnectivity();
+            
             try {
-                // CHANGED: Using Render Deployment URL
-                java.net.URL url = new java.net.URL("https://netra-1.onrender.com/register");
+                Log.d(TAG, "🌐 Uploading to: https://netra-1.onrender.com/register");
+                // TEST: Try local server first to isolate DNS issues
+                String testUrl = "http://192.168.0.98:4000/api/upload"; // Your working local server
+                Log.d(TAG, "🧪 Testing with local server: " + testUrl);
+                
+                java.net.URL url = new java.net.URL(testUrl);
                 
                 java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json; utf-8");
                 conn.setRequestProperty("Accept", "application/json");
                 conn.setDoOutput(true);
-                conn.setConnectTimeout(10000); // Increased timeout for cloud
+                conn.setConnectTimeout(15000); // 15s Connection Timeout
+                conn.setReadTimeout(15000);    // 15s Read Timeout
 
-                String jsonInputString = String.format(
-                    "{\"image_id\": \"%d\", \"author\": \"%s\", \"device_model\": \"%s\", \"timestamp\": \"%s\", \"constellation\": %s}",
-                    imageId,
-                    CAPTURED_BY,
-                    Build.MODEL,
-                    new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date()),
-                    constellationJson
-                );
+                // Create robust JSON object handles quotes and special characters in device names automatically
+                JSONObject jsonBody = new JSONObject();
+                jsonBody.put("image_id", String.valueOf(imageId));
+                jsonBody.put("author", CAPTURED_BY);
+                jsonBody.put("device_model", Build.MODEL);
+                jsonBody.put("timestamp", new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date()));
+                // Parse the pre-generated string back to array to ensure valid JSON structure is nested correctly
+                jsonBody.put("constellation", new JSONArray(constellationJson));
+                
+                String jsonInputString = jsonBody.toString();
 
                 try(java.io.OutputStream os = conn.getOutputStream()) {
                     byte[] input = jsonInputString.getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -710,17 +726,86 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 int code = conn.getResponseCode();
-                Log.d(TAG, "Database Upload Status: " + code);
+                Log.d(TAG, "💎 Database Response Code: " + code);
                 
-                // Read response if needed
-                if(code == 200) {
-                   runOnUiThread(() -> Toast.makeText(this, "Signature Registered Globally!", Toast.LENGTH_SHORT).show());
+                if(code >= 200 && code < 300) {
+                   runOnUiThread(() -> Toast.makeText(this, "✅ Registered to Global DB!", Toast.LENGTH_LONG).show());
+                } else {
+                    // Read error details from server
+                    try(java.io.InputStream errorStream = conn.getErrorStream()) {
+                        if(errorStream != null) {
+                             java.util.Scanner s = new java.util.Scanner(errorStream).useDelimiter("\\A");
+                             String result = s.hasNext() ? s.next() : "";
+                             Log.e(TAG, "❌ Server Error Body: " + result);
+                        }
+                    }
                 }
                 
             } catch (Exception e) {
-                 Log.e(TAG, "Database Upload Failed", e);
+                 Log.e(TAG, "❌ Upload Exception: " + e.getMessage());
+                 e.printStackTrace();
+                 
+                 // Provide specific guidance for common network issues
+                 String errorMsg = e.getMessage();
+                 if (errorMsg != null && errorMsg.contains("Unable to resolve host")) {
+                     runOnUiThread(() -> Toast.makeText(this, "❌ DNS Error - Check Internet Connection", Toast.LENGTH_LONG).show());
+                     Log.e(TAG, "🔧 TROUBLESHOOT: Try switching between WiFi and Mobile Data");
+                 } else {
+                     runOnUiThread(() -> Toast.makeText(this, "Upload Failed: " + errorMsg, Toast.LENGTH_SHORT).show());
+                 }
             }
         }).start();
+    }
+
+    private void testNetworkConnectivity() {
+        try {
+            // Test basic internet connectivity
+            Log.d(TAG, "🔍 Testing network connectivity...");
+            
+            // Test DNS resolution for our domain
+            java.net.InetAddress[] addresses = java.net.InetAddress.getAllByName("netra-1.onrender.com");
+            Log.d(TAG, "✅ DNS Resolution Success: " + addresses[0].getHostAddress());
+            
+        } catch (java.net.UnknownHostException e) {
+            Log.e(TAG, "❌ DNS Resolution Failed for netra-1.onrender.com");
+            Log.e(TAG, "🔧 NETWORK ISSUE: " + e.getMessage());
+            
+            // Try resolving a known good domain
+            try {
+                java.net.InetAddress.getAllByName("google.com");
+                Log.d(TAG, "✅ Internet works - DNS issue specific to our domain");
+                runOnUiThread(() -> Toast.makeText(this, "❌ Server domain blocked/filtered", Toast.LENGTH_LONG).show());
+            } catch (Exception e2) {
+                Log.e(TAG, "❌ No internet connectivity at all");
+                runOnUiThread(() -> Toast.makeText(this, "❌ No Internet Connection", Toast.LENGTH_LONG).show());
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Network test error: " + e.getMessage());
+        }
+    }
+
+    private void checkNetworkPermissions() {
+        // Check if Internet permission is granted
+        if (checkSelfPermission(android.Manifest.permission.INTERNET) == PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "✅ INTERNET permission granted");
+        } else {
+            Log.e(TAG, "❌ INTERNET permission DENIED");
+        }
+
+        // Check network state permission  
+        if (checkSelfPermission(android.Manifest.permission.ACCESS_NETWORK_STATE) == PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "✅ NETWORK_STATE permission granted");
+        } else {
+            Log.w(TAG, "⚠️ NETWORK_STATE permission not granted (optional)");
+        }
+
+        // Check if cleartext traffic is allowed
+        try {
+            boolean cleartextPermitted = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_USES_CLEARTEXT_TRAFFIC) != 0;
+            Log.d(TAG, "🔒 Cleartext traffic permitted: " + cleartextPermitted);
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error checking cleartext policy: " + e.getMessage());
+        }
     }
 
     @Override
