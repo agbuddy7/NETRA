@@ -695,11 +695,7 @@ public class MainActivity extends AppCompatActivity {
             
             try {
                 Log.d(TAG, "🌐 Uploading to: https://netra-1.onrender.com/register");
-                // TEST: Try local server first to isolate DNS issues
-                String testUrl = "http://192.168.0.98:4000/api/upload"; // Your working local server
-                Log.d(TAG, "🧪 Testing with local server: " + testUrl);
-                
-                java.net.URL url = new java.net.URL(testUrl);
+                java.net.URL url = new java.net.URL("https://netra-1.onrender.com/register");
                 
                 java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");

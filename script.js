@@ -412,7 +412,7 @@ function displayDatabaseResult(data) {
     const title = data.match ? '✅ MATCH FOUND IN DATABASE' : '❌ NO MATCH FOUND';
     
     let detailsHtml = '';
-    if (data.match) {
+    if (data.match) {      
         detailsHtml = `
             <div style="margin-top:15px; text-align:left;">
                 <p><strong>Image ID:</strong> ${data.metadata.image_id}</p>
