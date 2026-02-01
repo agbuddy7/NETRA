@@ -96,10 +96,3 @@ The geometric hash is currently **orientation-sensitive**.
 
 
 
-## License
-
-Distributed under the MIT License.
-
----
-
-NETRA Team - Securing Reality, One Pixel at a Time.
