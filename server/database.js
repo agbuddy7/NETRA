@@ -24,7 +24,13 @@ if (process.env.DATABASE_URL) {
         })
         .catch(err => console.error("Postgres connection error", err));
 
-} else {
+
+}
+
+else
+    
+{
+
     // Fallback to SQLite (Local)
     dbType = 'sqlite';
     console.log("Using SQLite Database (Local Development)");
