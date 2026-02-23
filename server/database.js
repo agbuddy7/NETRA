@@ -5,7 +5,69 @@ let sqliteDb;
 let pgClient;
 
 // 1. Determine DB Type based on Env Var
-if (process.env.DATABASE_URL) {
+if (process.env.SUPABASE_URL) {
+    dbType = 'supabase';
+    console.log("Using Supabase Database");
+
+    const { createClient } = require('@supabase/supabase-js');
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_KEY; // Use Service Role Key if strict RLS, or Anon Key if policies allow
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Override Exports for Supabase
+
+    // 1. REGISTER
+    exports.registerSignature = async (data) => {
+        let { image_id, author, device_model, timestamp, constellation } = data;
+        
+        // Ensure constellation is stringified
+        // If constellation is an object/array, stringify it
+        // If it's already a string, keep it as is
+        const constellationStr = (typeof constellation === 'string') 
+                                ? constellation 
+                                : JSON.stringify(constellation);
+
+        // Supabase Insert
+        const { data: result, error } = await supabase
+            .from('signatures')
+            .insert([
+                { 
+                    image_id, 
+                    author: author || 'Anonymous', 
+                    device_model, 
+                    timestamp, 
+                    constellation_data: constellationStr 
+                }
+            ])
+            .select();
+
+        if (error) {
+            console.error("Supabase Error:", error);
+            throw new Error(error.message);
+        }
+        
+        // Return object with inserted ID
+        return { id: (result && result[0]) ? result[0].id : 'new-rec' };
+    };
+
+    // 2. GET ALL
+    exports.getAllSignatures = async () => {
+        const { data, error } = await supabase
+            .from('signatures')
+            .select('*');
+
+        if (error) {
+            console.error("Supabase Select Error:", error);
+            throw new Error(error.message);
+        }
+        return data; 
+    };
+
+    // No initSchema needed for Supabase client, user manages it via Dashboard
+
+// 1. Determine DB Type based on Env Var
+} else if (process.env.DATABASE_URL) {
     dbType = 'postgres';
     console.log("Using PostgreSQL Database (Render/Production)");
     
