@@ -22,47 +22,28 @@ app.get('/', (req, res) => {
 // 2. REGISTER (From Android App)
 // Saves the signature so the world can verify it later
 app.post('/register', async (req, res) => {
-    console.log('--- Incoming /register Request ---');
-    console.log('Headers:', req.headers);
-    console.log('Body:', JSON.stringify(req.body, null, 2));
-
     const { image_id, author, device_model, timestamp, constellation } = req.body;
 
-    // Lax validation for debugging
-    if (!constellation) {
-        console.warn('WARNING: constellation is missing in request body');
-    } else if (!Array.isArray(constellation)) {
-        console.warn('WARNING: constellation is not an array:', typeof constellation);
+    if (!constellation || !Array.isArray(constellation)) {
+        return res.status(400).json({ error: 'Invalid constellation data' });
     }
 
     try {
-        // Attempt to save whatever we got, or mock success if DB fails
-        // For now, let's try to proceed even if data is partial
         const result = await db.registerSignature(req.body);
         res.json({ success: true, id: result.id, message: 'Signature registered successfully' });
     } catch (err) {
-        console.error('Database error during register:', err);
-        // Respond with success to the client just to see if it connects, 
-        // even if saving failed. Or return 500 but with details.
-        // User asked to "accept anything", so let's try to return a success structure 
-        // if the DB fails just to prove connectivity, or detailed error? 
-        // detailed error is better for debugging.
-        res.status(500).json({ error: 'Database error', details: err.message });
+        console.error(err);
+        res.status(500).json({ error: 'Database error' });
     }
 });
 
 // 3. VERIFY (From Web Viewer)
 // Compares uploaded image signature against ALL database records
 app.post('/verify', async (req, res) => {
-    console.log('--- Incoming /verify Request ---');
-    console.log('Headers:', req.headers);
-    console.log('Body:', JSON.stringify(req.body, null, 2));
-
     const { signature } = req.body; // The 64 points from the uploaded image
 
-    if (!signature) {
-        console.warn('WARNING: signature is missing or null.');
-        return res.status(400).json({ error: 'Signature field is required (even if empty for debug)' });
+    if (!signature || !Array.isArray(signature)) {
+        return res.status(400).json({ error: 'Invalid query signature' });
     }
 
     try {
