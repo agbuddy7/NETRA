@@ -916,3 +916,24 @@ function visualizeStrands(img, strands) {
         ctx.fillText(`Strand ${strand.id} (${strand.name || names[i]})`, x + 10, 25 + (i * 35));
     }
 }
+
+// --- Download button behavior ---
+document.addEventListener('DOMContentLoaded', function() {
+    const downloadBtn = document.getElementById('downloadBtn');
+    if (!downloadBtn) return;
+
+    downloadBtn.addEventListener('click', function(e) {
+        const url = downloadBtn.getAttribute('data-download-url') || downloadBtn.getAttribute('href');
+
+        // If no URL set, prevent navigation and inform the user
+        if (!url || url === '#') {
+            e.preventDefault();
+            alert('No download link set yet. Add a URL to the button\'s `data-download-url` or `href`.');
+            return;
+        }
+
+        // Open the provided URL in a new tab (download link or hosting page)
+        // Allow normal navigation for direct file urls by opening in a new tab
+        window.open(url, '_blank');
+    });
+});

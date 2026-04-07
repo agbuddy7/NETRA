@@ -267,6 +267,48 @@ input[type="file"] {
     overflow: hidden;
 }
 
+/* Download button - matches hero/theme but smaller */
+.download-btn {
+    display: inline-block;
+    padding: 12px 36px;
+    font-size: 1rem;
+    font-weight: 800;
+    font-family: 'JetBrains Mono', monospace;
+    color: #fff;
+    background: #000;
+    border: 3px solid #000;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    text-decoration: none;
+    box-shadow: 4px 4px 0px rgba(0,0,0,0.15);
+    transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.download-btn:hover {
+    background: #fff;
+    color: #000;
+    transform: translate(-2px, -2px);
+}
+
+/* Read instructions link (smaller, subtle) */
+.read-instructions {
+    display: inline-block;
+    padding: 8px 18px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    color: #000;
+    background: transparent;
+    border: 2px solid transparent;
+    text-decoration: underline;
+}
+
+.read-instructions:hover {
+    color: #000;
+    background: #f3f3f3;
+    transform: translate(-1px, -1px);
+}
+
 .verify-btn:hover:not(:disabled) {
     background: #fff;
     color: #000;
