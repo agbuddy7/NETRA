@@ -129,6 +129,16 @@ body {
     color: #444;
 }
 
+/* Hardcoded instructions block styling */
+.hardcoded-instructions {
+    background: rgba(255,255,255,0.9);
+    border: 2px solid #000;
+    padding: 12px 18px;
+    box-shadow: 4px 4px 0 rgba(0,0,0,0.08);
+    font-family: 'Inter', sans-serif;
+    font-size: 0.95rem;
+}
+
 .container {
     max-width: 1200px;
     margin: 40px auto;
