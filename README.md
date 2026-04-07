@@ -7,7 +7,6 @@ NETRA is a comprehensive image provenance system designed to combat the rise of 
 ## Live Demo
 
 *   **Web Verifier:** https://netra-star.vercel.app/
-*   **Backend API:** https://netra-1.onrender.com (Live on Render)
 
 ---
 
@@ -17,16 +16,6 @@ NETRA is a comprehensive image provenance system designed to combat the rise of 
 *   **Geometric Constellation Hashing:** Uses a specialized computer vision algorithm to extract the "brightest stars" (luminance peaks) in an 8x8 grid.
 *   **Zero-Knowledge Integrity:** No biometric data or full image files are ever stored on the server.
 *   **Global Registry:** Signatures are instantly verifiable via the public web portal.
-
----
-
-## Tech Stack
-
-*   **Mobile:** Android (Java), ContentObserver, OkHttp.
-*   **Backend:** Node.js, Express.js (Deployed on Render).
-*   **Database:** PostgreSQL.
-*   **Frontend:** HTML5/JS (Deployed on Vercel).
-*   **Algorithm:** Custom Luminance Keypoint Extraction.
 
 ---
 
@@ -51,7 +40,19 @@ Since the backend and frontend are already live, you only need to install the **
 ### 3. Verify on Web
 1.  Go to the [NETRA Web Verifier](https://netra-star.vercel.app/).
 2.  Upload the photo.
-3.  Click **Verify**.
+3.  Click Search Databse or Uploading locally generated files and then click **Verify**.
+
+## Tech Stack
+
+*   **Mobile:** Android (Java), ContentObserver, OkHttp.
+*   **Backend:** Node.js, Express.js (Deployed on Render).
+*   **Database:** PostgreSQL.
+*   **Frontend:** HTML5/JS (Deployed on Vercel).
+*   **Algorithm:** Custom Luminance Keypoint Extraction.
+
+---
+
+
 
 ---
 
