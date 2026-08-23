@@ -19,14 +19,9 @@ if (process.env.SUPABASE_URL) {
 
     // 1. REGISTER
     exports.registerSignature = async (data) => {
-        let { image_id, author, device_model, timestamp, constellation } = data;
+        let { image_id, author, device_model, timestamp, watermark_payload } = data;
         
-        // Ensure constellation is stringified
-        // If constellation is an object/array, stringify it
-        // If it's already a string, keep it as is
-        const constellationStr = (typeof constellation === 'string') 
-                                ? constellation 
-                                : JSON.stringify(constellation);
+        const constellationStr = watermark_payload;
 
         // Supabase Insert
         const { data: result, error } = await supabase
@@ -158,8 +153,8 @@ if (process.env.SUPABASE_URL) {
     // REGISTER
     exports.registerSignature = (data) => {
         return new Promise((resolve, reject) => {
-            const { image_id, author, device_model, timestamp, constellation } = data;
-            const constellationStr = JSON.stringify(constellation);
+            const { image_id, author, device_model, timestamp, watermark_payload } = data;
+            const constellationStr = watermark_payload;
     
             if (dbType === 'postgres') {
                 const query = `

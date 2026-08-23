@@ -23,10 +23,10 @@ app.get('/', (req, res) => {
 // 2. REGISTER (From Android App)
 // Saves the signature so the world can verify it later
 app.post('/register', async (req, res) => {
-    const { image_id, author, device_model, timestamp, constellation } = req.body;
+    const { image_id, author, device_model, timestamp, watermark_payload } = req.body;
 
-    if (!constellation || !Array.isArray(constellation)) {
-        return res.status(400).json({ error: 'Invalid constellation data' });
+    if (!watermark_payload || typeof watermark_payload !== 'string') {
+        return res.status(400).json({ error: 'Invalid watermark payload data' });
     }
 
     try {
@@ -41,47 +41,45 @@ app.post('/register', async (req, res) => {
 // 3. VERIFY (From Web Viewer)
 // Compares uploaded image signature against ALL database records
 app.post('/verify', async (req, res) => {
-    const { signature } = req.body; // The 64 points from the uploaded image
+    const { signature } = req.body; // The extracted string
 
-    if (!signature || !Array.isArray(signature)) {
+    if (!signature || typeof signature !== 'string') {
         return res.status(400).json({ error: 'Invalid query signature' });
     }
 
     try {
-        // Fetch all signatures to compare (In prod, use a spatial index or vector DB)
+        // Fetch all signatures to compare
         const rows = await db.getAllSignatures();
         
         let bestMatch = null;
-        let highestScore = 0;
 
         // --- THE COMPARISON LOGIC (Server Side) ---
         rows.forEach(row => {
-            const dbStars = JSON.parse(row.constellation_data);
-            const score = calculateMatchScore(signature, dbStars);
+            // Strip surrounding quotes if they exist (depending on how it was saved)
+            let dbPayload = row.constellation_data || "";
+            if (dbPayload.startsWith('"') && dbPayload.endsWith('"')) {
+                dbPayload = dbPayload.substring(1, dbPayload.length - 1);
+            }
 
-            if (score > highestScore) {
-                highestScore = score;
+            if (signature === dbPayload) {
                 bestMatch = row;
             }
         });
 
-        // Threshold: 75% confidence
-        if (highestScore > 75 && bestMatch) {
+        if (bestMatch) {
             res.json({
                 match: true,
-                score: highestScore,
                 metadata: {
                     author: bestMatch.author,
                     device: bestMatch.device_model,
                     original_timestamp: bestMatch.timestamp,
                     image_id: bestMatch.image_id,
-                    registered_at: bestMatch.created_at
+                    registered_at: bestMatch.created_at || bestMatch.timestamp
                 }
             });
         } else {
             res.json({
                 match: false,
-                score: highestScore,
                 message: 'No authentic record found for this image.'
             });
         }
