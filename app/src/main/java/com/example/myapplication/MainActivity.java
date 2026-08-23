@@ -325,15 +325,39 @@ public class MainActivity extends AppCompatActivity {
             String payload = "proofKrypt-" + imageId;
             Bitmap watermarkedBitmap = WatermarkUtils.embedDCTWatermark(fullBitmap, payload);
             
-            // Save watermarked bitmap
-            File directory = new File(getExternalFilesDir(null), "PhotoProvenance");
-            if (!directory.exists()) directory.mkdirs();
-            File outFile = new File(directory, "watermarked_" + imageId + ".png");
-            
-            FileOutputStream out = new FileOutputStream(outFile);
-            watermarkedBitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
-            out.flush();
-            out.close();
+            // Save watermarked bitmap back to the original Uri (overwrite)
+            try {
+                // Open the original image Uri for writing ("wt" mode truncates existing content)
+                java.io.OutputStream out = getContentResolver().openOutputStream(imageUri, "wt");
+                if (out != null) {
+                    // MUST be saved as PNG to preserve the exact DCT pixel values!
+                    watermarkedBitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
+                    out.flush();
+                    out.close();
+                    Log.d(TAG, "Successfully replaced the original photo with the watermarked version.");
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to replace original photo (Scoped Storage permission issue?)", e);
+                // Fallback to saving in the Pictures folder if overwrite fails
+                File directory = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES);
+                File outFile = new File(directory, "watermarked_" + imageId + ".png");
+                try {
+                    java.io.FileOutputStream fallbackOut = new java.io.FileOutputStream(outFile);
+                    watermarkedBitmap.compress(Bitmap.CompressFormat.PNG, 100, fallbackOut);
+                    fallbackOut.flush();
+                    fallbackOut.close();
+                    
+                    // Force the Android Media Scanner to index the new file so it appears in the Gallery immediately!
+                    android.media.MediaScannerConnection.scanFile(this, 
+                        new String[]{outFile.getAbsolutePath()}, 
+                        new String[]{"image/png"}, 
+                        null);
+                        
+                    Log.d(TAG, "Fallback save successful and scanned into gallery.");
+                } catch (Exception ex) {
+                    Log.e(TAG, "Fallback save failed", ex);
+                }
+            }
 
             // Send to database
             runOnUiThread(() -> updateStatus("Generating Signature..."));
