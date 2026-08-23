@@ -41,6 +41,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
@@ -95,6 +98,9 @@ public class MainActivity extends AppCompatActivity {
         queueProcessor = Executors.newSingleThreadExecutor();
 
         Log.d(TAG, "Image Provenance System - 3 Vertical Strands (Raw Pixel Data)");
+
+        // Debug network permissions and security policy
+        checkNetworkPermissions();
 
         startQueueProcessor();
         checkPermissionAndRegisterObserver();
@@ -277,7 +283,7 @@ public class MainActivity extends AppCompatActivity {
 
                     Log.d(TAG, "Processing: " + displayName);
 
-                    loadAndExtract3Strands(imageUri, displayName, width, height, fileSize, imageId);
+                    processAndWatermarkImage(imageUri, displayName, width, height, fileSize, imageId);
                 }
             }
         } catch (Exception e) {
@@ -285,7 +291,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void loadAndExtract3Strands(Uri imageUri, String displayName, int width, int height, long fileSize, long imageId) {
+    private void processAndWatermarkImage(Uri imageUri, String displayName, int width, int height, long fileSize, long imageId) {
         try {
             InputStream inputStream = getContentResolver().openInputStream(imageUri);
             if (inputStream == null) return;
@@ -315,8 +321,23 @@ public class MainActivity extends AppCompatActivity {
             int actualHeight = height > 0 ? height : imageHeight;
 
             // Extract 3 vertical strands
-            runOnUiThread(() -> updateStatus("Extracting 3 vertical strands..."));
-            extract3VerticalStrands(fullBitmap, imageId, displayName, actualWidth, actualHeight, fileSize, imageUri.toString());
+            runOnUiThread(() -> updateStatus("Embedding Invisible Watermark..."));
+            String payload = "proofKrypt-" + imageId;
+            Bitmap watermarkedBitmap = WatermarkUtils.embedDCTWatermark(fullBitmap, payload);
+            
+            // Save watermarked bitmap
+            File directory = new File(getExternalFilesDir(null), "PhotoProvenance");
+            if (!directory.exists()) directory.mkdirs();
+            File outFile = new File(directory, "watermarked_" + imageId + ".png");
+            
+            FileOutputStream out = new FileOutputStream(outFile);
+            watermarkedBitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
+            out.flush();
+            out.close();
+
+            // Send to database
+            runOnUiThread(() -> updateStatus("Generating Signature..."));
+            sendSignatureToDatabase(imageId, null);
 
             // Create display bitmap
             Bitmap displayBitmap = createDisplayBitmap(imageUri);
@@ -333,7 +354,7 @@ public class MainActivity extends AppCompatActivity {
                             actualWidth, actualHeight, fileSize / (1024.0 * 1024.0)));
                     updatePhotoCount();
 
-                    Toast.makeText(this, "Photo #" + photosCapturedCount + " - 3 strands extracted!", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Photo #" + photosCapturedCount + " - Watermark embedded!", Toast.LENGTH_SHORT).show();
 
                 } catch (Exception e) {
                     Log.e(TAG, "Error updating UI", e);
@@ -343,223 +364,16 @@ public class MainActivity extends AppCompatActivity {
             if (fullBitmap != displayBitmap) {
                 fullBitmap.recycle();
             }
+            if (watermarkedBitmap != displayBitmap) {
+                watermarkedBitmap.recycle();
+            }
 
         } catch (Exception e) {
             Log.e(TAG, "Error loading image", e);
         }
     }
 
-    private void extract3VerticalStrands(Bitmap bitmap, long imageId, String displayName, int width, int height, long fileSize, String uri) {
-        try {
-            long startTime = System.currentTimeMillis();
-
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
-            String timestamp = sdf.format(new Date());
-
-            File directory = new File(getExternalFilesDir(null), "PhotoProvenance");
-            if (!directory.exists()) {
-                directory.mkdirs();
-            }
-
-            String pixelFileName = "pixel_strands_" + imageId + ".txt";
-            File pixelFile = new File(directory, pixelFileName);
-
-            FileOutputStream fos = new FileOutputStream(pixelFile);
-            OutputStreamWriter writer = new OutputStreamWriter(fos);
-
-            // Write header
-            writer.write("==============================================\n");
-            writer.write("3 VERTICAL PIXEL STRANDS\n");
-            writer.write("==============================================\n\n");
-            writer.write("Image ID: " + imageId + "\n");
-            writer.write("File Name: " + displayName + "\n");
-            writer.write("Image Dimensions: " + width + " x " + height + " pixels\n");
-            writer.write("File Size: " + String.format("%.2f MB", fileSize / (1024.0 * 1024.0)) + "\n");
-            writer.write("URI: " + uri + "\n");
-            writer.write("Captured At: " + timestamp + "\n");
-            writer.write("Captured By: " + CAPTURED_BY + "\n");
-            writer.write("Total Strands: 3 (Vertical)\n");
-            writer.write("Strand Height: " + (height / 3) + " pixels each\n");
-            writer.write("Format: X,Y,RGB,HEX\n");
-            writer.write("\n==============================================\n\n");
-
-            int strandHeight = height / 3; // Each strand covers 1/3 of image height
-
-            // Calculate X positions: 15%, 50%, 80% of width
-            int x1 = (int)(width * 0.15); // 15% from left
-            int x2 = (int)(width * 0.50); // 50% (middle)
-            int x3 = (int)(width * 0.80); // 80% from left
-
-            // Calculate Y starting positions: bottom, middle, top
-            int y1_start = height - strandHeight; // Bottom strand
-            int y2_start = (height - strandHeight) / 2; // Middle strand
-            int y3_start = 0; // Top strand
-
-            Log.d(TAG, "Strand 1 (Bottom): X=" + x1 + ", Y=" + y1_start + " to " + (y1_start + strandHeight));
-            Log.d(TAG, "Strand 2 (Middle): X=" + x2 + ", Y=" + y2_start + " to " + (y2_start + strandHeight));
-            Log.d(TAG, "Strand 3 (Top): X=" + x3 + ", Y=" + y3_start + " to " + (y3_start + strandHeight));
-
-            // ============ STRAND 1: Bottom (X=15%) ============
-            writer.write("--- STRAND 1: BOTTOM (X=" + x1 + ", 15% from left) ---\n");
-            writer.write("Start: (" + x1 + "," + y1_start + ") | End: (" + x1 + "," + (y1_start + strandHeight - 1) + ")\n\n");
-
-            int count1 = 0;
-            for (int y = y1_start; y < y1_start + strandHeight && y < height; y++) {
-                int pixel = bitmap.getPixel(x1, y);
-                int r = Color.red(pixel);
-                int g = Color.green(pixel);
-                int b = Color.blue(pixel);
-                String hex = String.format("#%02X%02X%02X", r, g, b);
-
-                writer.write(String.format("X=%d,Y=%d,RGB(%d,%d,%d),%s\n", x1, y, r, g, b, hex));
-                count1++;
-            }
-            writer.write("\n");
-
-            // ============ STRAND 2: Middle (X=50%) ============
-            writer.write("--- STRAND 2: MIDDLE (X=" + x2 + ", 50% from left) ---\n");
-            writer.write("Start: (" + x2 + "," + y2_start + ") | End: (" + x2 + "," + (y2_start + strandHeight - 1) + ")\n\n");
-
-            int count2 = 0;
-            for (int y = y2_start; y < y2_start + strandHeight && y < height; y++) {
-                int pixel = bitmap.getPixel(x2, y);
-                int r = Color.red(pixel);
-                int g = Color.green(pixel);
-                int b = Color.blue(pixel);
-                String hex = String.format("#%02X%02X%02X", r, g, b);
-
-                writer.write(String.format("X=%d,Y=%d,RGB(%d,%d,%d),%s\n", x2, y, r, g, b, hex));
-                count2++;
-            }
-            writer.write("\n");
-
-            // ============ STRAND 3: Top (X=80%) ============
-            writer.write("--- STRAND 3: TOP (X=" + x3 + ", 80% from left) ---\n");
-            writer.write("Start: (" + x3 + "," + y3_start + ") | End: (" + x3 + "," + (y3_start + strandHeight - 1) + ")\n\n");
-
-            int count3 = 0;
-            for (int y = y3_start; y < y3_start + strandHeight && y < height; y++) {
-                int pixel = bitmap.getPixel(x3, y);
-                int r = Color.red(pixel);
-                int g = Color.green(pixel);
-                int b = Color.blue(pixel);
-                String hex = String.format("#%02X%02X%02X", r, g, b);
-
-                writer.write(String.format("X=%d,Y=%d,RGB(%d,%d,%d),%s\n", x3, y, r, g, b, hex));
-                count3++;
-            }
-            writer.write("\n");
-
-            // Write footer
-            writer.write("==============================================\n");
-            writer.write("EXTRACTION SUMMARY\n");
-            writer.write("==============================================\n");
-            writer.write("Strand 1 pixels: " + count1 + "\n");
-            writer.write("Strand 2 pixels: " + count2 + "\n");
-            writer.write("Strand 3 pixels: " + count3 + "\n");
-            writer.write("Total pixels extracted: " + (count1 + count2 + count3) + "\n");
-            writer.write("==============================================\n");
-
-            writer.close();
-            fos.close();
-
-            long endTime = System.currentTimeMillis();
-            long duration = endTime - startTime;
-
-            Log.d(TAG, "✓ 3 vertical strands extracted in " + duration + "ms");
-            Log.d(TAG, "✓ File saved: " + pixelFile.getAbsolutePath());
-            Log.d(TAG, "✓ File size: " + (pixelFile.length() / 1024) + " KB");
-            Log.d(TAG, "✓ Total pixels: " + (count1 + count2 + count3));
-
-            // Save metadata summary
-            saveMetadataSummary(imageId, displayName, width, height, fileSize, uri, timestamp,
-                    x1, x2, x3, y1_start, y2_start, y3_start, strandHeight, count1, count2, count3);
-
-        } catch (Exception e) {
-            Log.e(TAG, "Error extracting strands", e);
-            e.printStackTrace();
-        }
-    }
-
-    private void saveMetadataSummary(long imageId, String displayName, int width, int height, long fileSize, String uri,
-                                     String timestamp, int x1, int x2, int x3, int y1_start, int y2_start, int y3_start,
-                                     int strandHeight, int count1, int count2, int count3) {
-        try {
-            File directory = new File(getExternalFilesDir(null), "PhotoProvenance");
-            String summaryFileName = "metadata_" + imageId + ".txt";
-            File summaryFile = new File(directory, summaryFileName);
-
-            FileOutputStream fos = new FileOutputStream(summaryFile);
-            OutputStreamWriter writer = new OutputStreamWriter(fos);
-
-            writer.write("==============================================\n");
-            writer.write("PHOTO METADATA\n");
-            writer.write("==============================================\n\n");
-            writer.write("Image ID: " + imageId + "\n");
-            writer.write("File Name: " + displayName + "\n");
-            writer.write("Resolution: " + width + " x " + height + " pixels\n");
-            writer.write("File Size: " + String.format("%.2f MB", fileSize / (1024.0 * 1024.0)) + "\n");
-            writer.write("URI: " + uri + "\n");
-            writer.write("Captured At: " + timestamp + "\n");
-            writer.write("Captured By: " + CAPTURED_BY + "\n");
-            writer.write("Photo Number: " + photosCapturedCount + "\n\n");
-
-            writer.write("STRAND CONFIGURATION:\n");
-            writer.write("Total Strands: 3 (Vertical)\n");
-            writer.write("Strand Height: " + strandHeight + " pixels (" + (height / 3) + " per strand)\n\n");
-
-            writer.write("Strand 1 (Bottom):\n");
-            writer.write("  X Position: " + x1 + " (15% from left)\n");
-            writer.write("  Y Range: " + y1_start + " to " + (y1_start + strandHeight - 1) + "\n");
-            writer.write("  Pixels: " + count1 + "\n\n");
-
-            writer.write("Strand 2 (Middle):\n");
-            writer.write("  X Position: " + x2 + " (50% from left)\n");
-            writer.write("  Y Range: " + y2_start + " to " + (y2_start + strandHeight - 1) + "\n");
-            writer.write("  Pixels: " + count2 + "\n\n");
-
-            writer.write("Strand 3 (Top):\n");
-            writer.write("  X Position: " + x3 + " (80% from left)\n");
-            writer.write("  Y Range: " + y3_start + " to " + (y3_start + strandHeight - 1) + "\n");
-            writer.write("  Pixels: " + count3 + "\n\n");
-
-            writer.write("Total Pixels Extracted: " + (count1 + count2 + count3) + "\n");
-            writer.write("Pixel Data File: pixel_strands_" + imageId + ".txt\n");
-            writer.write("\n==============================================\n");
-
-            writer.close();
-            fos.close();
-
-            Log.d(TAG, "✓ Metadata summary saved");
-
-            // Update master log
-            updateMasterLog(imageId, displayName, width, height, fileSize, timestamp, count1 + count2 + count3);
-
-        } catch (Exception e) {
-            Log.e(TAG, "Error saving metadata summary", e);
-        }
-    }
-
-    private void updateMasterLog(long imageId, String displayName, int width, int height, long fileSize, String timestamp, int totalPixels) {
-        try {
-            File directory = new File(getExternalFilesDir(null), "PhotoProvenance");
-            File masterLog = new File(directory, "master_log.txt");
-
-            FileOutputStream fos = new FileOutputStream(masterLog, true);
-            OutputStreamWriter writer = new OutputStreamWriter(fos);
-
-            String logEntry = String.format("[%s] ID:%d | %s | %dx%d | %.2fMB | 3V | Pixels:%d\n",
-                    timestamp, imageId, displayName, width, height,
-                    fileSize / (1024.0 * 1024.0), totalPixels);
-
-            writer.write(logEntry);
-            writer.close();
-            fos.close();
-
-        } catch (Exception e) {
-            Log.e(TAG, "Error updating master log", e);
-        }
-    }
+    // Removed legacy strand methods
 
     private Bitmap createDisplayBitmap(Uri imageUri) {
         try {
@@ -596,6 +410,121 @@ public class MainActivity extends AppCompatActivity {
         }
 
         return inSampleSize;
+    }
+
+    private void sendSignatureToDatabase(long imageId, String constellationJson) {
+        new Thread(() -> {
+            try {
+                Log.d(TAG, "🌐 Uploading to Render Database...");
+                java.net.URL url = new java.net.URL("https://netra-1.onrender.com/register");
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8"); // Fixed charset syntax
+                conn.setRequestProperty("Accept", "application/json");
+                conn.setDoOutput(true);
+                conn.setDoInput(true); // Explicitly enable input
+                conn.setConnectTimeout(15000);
+
+                // 1. Timestamp
+                SimpleDateFormat isoFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+                isoFormat.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+                String isoTimestamp = isoFormat.format(new Date());
+
+                // 2. Build JSON
+                JSONObject jsonBody = new JSONObject();
+                jsonBody.put("image_id", "ANDROID-" + imageId);
+                jsonBody.put("author", CAPTURED_BY);
+                jsonBody.put("device_model", Build.MODEL);
+                jsonBody.put("timestamp", isoTimestamp);
+
+                // CRITICAL: Updated payload format for DCT watermark system
+                jsonBody.put("watermark_payload", "proofKrypt-" + imageId);
+
+                String jsonInputString = jsonBody.toString();
+
+                // Log payload to be sure
+                Log.d("UPLOAD_DEBUG", "Payload: " + jsonInputString);
+
+                // 3. Send
+                byte[] input = jsonInputString.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                // Set content length to help the server parser
+                conn.setRequestProperty("Content-Length", String.valueOf(input.length));
+
+                try(java.io.OutputStream os = conn.getOutputStream()) {
+                    os.write(input, 0, input.length);
+                    os.flush(); // Ensure everything is written
+                }
+
+                int code = conn.getResponseCode();
+                Log.d(TAG, "💎 Response Code: " + code);
+
+                if(code >= 200 && code < 300) {
+                    // Success
+                    // ...
+                } else {
+                    // Error reading
+                    java.io.InputStream err = conn.getErrorStream();
+                    if(err != null) {
+                        java.util.Scanner s = new java.util.Scanner(err).useDelimiter("\\A");
+                        Log.e(TAG, "❌ Server Rejected: " + (s.hasNext() ? s.next() : ""));
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Error: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }).start();
+    }
+
+    private void testNetworkConnectivity() {
+        try {
+            // Test basic internet connectivity
+            Log.d(TAG, "🔍 Testing network connectivity...");
+
+            // Test DNS resolution for our domain
+            java.net.InetAddress[] addresses = java.net.InetAddress.getAllByName("netra-1.onrender.com");
+            Log.d(TAG, "✅ DNS Resolution Success: " + addresses[0].getHostAddress());
+
+        } catch (java.net.UnknownHostException e) {
+            Log.e(TAG, "❌ DNS Resolution Failed for netra-1.onrender.com");
+            Log.e(TAG, "🔧 NETWORK ISSUE: " + e.getMessage());
+
+            // Try resolving a known good domain
+            try {
+                java.net.InetAddress.getAllByName("google.com");
+                Log.d(TAG, "✅ Internet works - DNS issue specific to our domain");
+                runOnUiThread(() -> Toast.makeText(this, "❌ Server domain blocked/filtered", Toast.LENGTH_LONG).show());
+            } catch (Exception e2) {
+                Log.e(TAG, "❌ No internet connectivity at all");
+                runOnUiThread(() -> Toast.makeText(this, "❌ No Internet Connection", Toast.LENGTH_LONG).show());
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Network test error: " + e.getMessage());
+        }
+    }
+
+    private void checkNetworkPermissions() {
+        // Check if Internet permission is granted
+        if (checkSelfPermission(android.Manifest.permission.INTERNET) == PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "✅ INTERNET permission granted");
+        } else {
+            Log.e(TAG, "❌ INTERNET permission DENIED");
+        }
+
+        // Check network state permission
+        if (checkSelfPermission(android.Manifest.permission.ACCESS_NETWORK_STATE) == PackageManager.PERMISSION_GRANTED) {
+            Log.d(TAG, "✅ NETWORK_STATE permission granted");
+        } else {
+            Log.w(TAG, "⚠️ NETWORK_STATE permission not granted (optional)");
+        }
+
+        // Check if cleartext traffic is allowed
+        try {
+            boolean cleartextPermitted = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_USES_CLEARTEXT_TRAFFIC) != 0;
+            Log.d(TAG, "🔒 Cleartext traffic permitted: " + cleartextPermitted);
+            } catch (Exception e) {
+            Log.e(TAG, "❌ Error checking cleartext policy: " + e.getMessage());
+        }
     }
 
     @Override
