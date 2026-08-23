@@ -43,8 +43,15 @@ app.post('/register', async (req, res) => {
 app.post('/verify', async (req, res) => {
     const { signature } = req.body; // The extracted string
 
-    if (!signature || typeof signature !== 'string') {
-        return res.status(400).json({ error: 'Invalid query signature' });
+    if (typeof signature !== 'string') {
+        return res.status(400).json({ error: 'Invalid query signature format' });
+    }
+    
+    if (!signature) {
+        return res.json({
+            match: false,
+            message: 'No watermark detected in the image.'
+        });
     }
 
     try {

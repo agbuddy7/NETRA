@@ -52,9 +52,9 @@ function setupVerifyButton() {
 }
 
 async function startVerification() {
-    document.getElementById('errorMessage').classList.remove('show');
-    document.getElementById('resultContainer').classList.remove('show');
-    document.getElementById('loading').classList.add('show');
+    document.getElementById('errorMessage').style.display = 'none';
+    document.getElementById('resultContainer').style.display = 'none';
+    document.getElementById('loading').style.display = 'block';
     
     try {
         console.log('Starting verification...');
@@ -88,7 +88,7 @@ async function startVerification() {
         console.error('Verification error:', error);
         showError('Verification failed: ' + error.message);
     } finally {
-        document.getElementById('loading').classList.remove('show');
+        document.getElementById('loading').style.display = 'none';
         document.querySelector('#loading p').textContent = "Extracting invisible watermark...";
     }
 }
@@ -167,6 +167,9 @@ async function extractDCTWatermark(canvas, bitLength) {
         }
     }
     
+    // Log the raw binary sequence for debugging
+    console.log("Raw extracted bits (first 64):", extractedBits.slice(0, 64).join(''));
+    
     return bitsToText(extractedBits);
 }
 
@@ -205,7 +208,7 @@ function bitsToText(bits) {
 }
 
 function displayResults(isMatch, extractedPayload, dbData) {
-    document.getElementById('resultContainer').classList.add('show');
+    document.getElementById('resultContainer').style.display = 'block';
     
     const pf = document.getElementById('progressFill');
     if (isMatch) {
@@ -251,5 +254,5 @@ function displayResults(isMatch, extractedPayload, dbData) {
 
 function showError(msg) {
     document.getElementById('errorMessage').textContent = '⚠️ ' + msg;
-    document.getElementById('errorMessage').classList.add('show');
+    document.getElementById('errorMessage').style.display = 'block';
 }
