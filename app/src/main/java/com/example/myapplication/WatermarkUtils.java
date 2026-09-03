@@ -143,23 +143,30 @@ public class WatermarkUtils {
         List<Integer> payloadBits = textToBits(payload);
         int length = payloadBits.size();
         
-        List<Integer> rawPayload = new ArrayList<>();
-        for (int b : MAGIC_BITS) rawPayload.add(b);
-        for (int i = 15; i >= 0; i--) rawPayload.add((length >> i) & 1);
-        rawPayload.addAll(payloadBits);
+        // 1. Uninterleaved Header
+        List<Integer> headerRaw = new ArrayList<>();
+        for (int b : MAGIC_BITS) headerRaw.add(b);
+        for (int i = 15; i >= 0; i--) headerRaw.add((length >> i) & 1);
         
-        List<Integer> eccBits = hammingEncode(rawPayload);
+        List<Integer> eccHeader = hammingEncode(headerRaw);
+        List<Integer> redundantHeader = new ArrayList<>();
+        for (int r = 0; r < REDUNDANCY; r++) redundantHeader.addAll(eccHeader);
         
-        List<Integer> redundantBits = new ArrayList<>();
-        for (int r = 0; r < REDUNDANCY; r++) {
-            redundantBits.addAll(eccBits);
-        }
+        // 2. Interleaved Payload
+        List<Integer> eccPayload = hammingEncode(payloadBits);
+        List<Integer> redundantPayload = new ArrayList<>();
+        for (int r = 0; r < REDUNDANCY; r++) redundantPayload.addAll(eccPayload);
         
-        List<Integer> interleavedBits = interleave(redundantBits, PRNG_SEED);
+        List<Integer> interleavedPayload = interleave(redundantPayload, PRNG_SEED);
+        
+        // 3. Combine
+        List<Integer> finalBits = new ArrayList<>();
+        finalBits.addAll(redundantHeader);
+        finalBits.addAll(interleavedPayload);
         
         int numBlocks = (padWidth / 8) * (padHeight / 8);
-        if (interleavedBits.size() > numBlocks) {
-            Log.e(TAG, "Image too small. Need " + interleavedBits.size() + " blocks, have " + numBlocks);
+        if (finalBits.size() > numBlocks) {
+            Log.e(TAG, "Image too small. Need " + finalBits.size() + " blocks, have " + numBlocks);
             return src; // Fallback
         }
         
@@ -178,8 +185,8 @@ public class WatermarkUtils {
         int blocksW = padWidth / 8;
         
         // Embed directly into allPixels block by block to save memory and CPU
-        for (int i = 0; i < interleavedBits.size(); i++) {
-            int bit = interleavedBits.get(i);
+        for (int i = 0; i < finalBits.size(); i++) {
+            int bit = finalBits.get(i);
             int bIdx = blockIndices[i];
             
             int by = (bIdx / blocksW) * 8;
