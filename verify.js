@@ -81,6 +81,11 @@ async function startVerification() {
             }
         });
         
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Supabase returned ${response.status}: ${errText}`);
+        }
+        
         const rows = await response.json();
         console.log("Supabase response:", rows);
         
@@ -274,24 +279,22 @@ async function extractDCTWatermark(canvas) {
     }
     
     // Recovery
-    let deinterleaved = deinterleave(extractedBits, PRNG_SEED);
+    // Header is first 392 bits (32 bits -> 56 ECC -> 392 Redundant)
+    if (extractedBits.length < 392) return "";
     
-    let voted = [];
-    let chunkSize = Math.floor(deinterleaved.length / REDUNDANCY);
-    for (let i = 0; i < chunkSize; i++) {
+    let headerBits = extractedBits.slice(0, 392);
+    let headerVoted = [];
+    let headerChunkSize = 392 / REDUNDANCY;
+    for (let i = 0; i < headerChunkSize; i++) {
         let votes = 0;
-        for (let r = 0; r < REDUNDANCY; r++) {
-            votes += deinterleaved[i + r * chunkSize];
-        }
-        voted.push(votes > Math.floor(REDUNDANCY / 2) ? 1 : 0);
+        for (let r = 0; r < REDUNDANCY; r++) votes += headerBits[i + r * headerChunkSize];
+        headerVoted.push(votes > Math.floor(REDUNDANCY / 2) ? 1 : 0);
     }
     
-    let payloadRaw = hammingDecode(voted);
+    let headerRaw = hammingDecode(headerVoted);
+    if (headerRaw.length < 32) return "";
     
-    // Parsing Header
-    if (payloadRaw.length < 32) return "";
-    
-    let magic = payloadRaw.slice(0, 16);
+    let magic = headerRaw.slice(0, 16);
     let magicMatch = true;
     for (let i = 0; i < 16; i++) {
         if (magic[i] !== MAGIC_BITS[i]) magicMatch = false;
@@ -303,20 +306,37 @@ async function extractDCTWatermark(canvas) {
     
     console.log("✅ Magic marker 'PK' found (v3)!");
     
-    let lengthBits = payloadRaw.slice(16, 32);
+    let lengthBits = headerRaw.slice(16, 32);
     let payloadLength = 0;
-    for (let b of lengthBits) {
-        payloadLength = (payloadLength << 1) | b;
-    }
+    for (let b of lengthBits) payloadLength = (payloadLength << 1) | b;
     
     console.log(`Payload length: ${payloadLength} bits (${Math.floor(payloadLength / 8)} chars)`);
     
-    if (payloadRaw.length < 32 + payloadLength) {
+    // Now extract exactly the payload bits
+    // payloadLength bits -> (payloadLength * 7/4) ECC -> * 7 Redundancy
+    let payloadEccLen = Math.ceil(payloadLength / 4) * 7;
+    let payloadRedundantLen = payloadEccLen * REDUNDANCY;
+    
+    let payloadBits = extractedBits.slice(392, 392 + payloadRedundantLen);
+    
+    if (payloadBits.length < payloadRedundantLen) {
         console.log("Warning: truncated payload in v3");
-        return bitsToText(payloadRaw.slice(32));
+        // We can't properly deinterleave if it's truncated, but we try with what we have
     }
     
-    return bitsToText(payloadRaw.slice(32, 32 + payloadLength));
+    let deinterleaved = deinterleave(payloadBits, PRNG_SEED);
+    
+    let payloadVoted = [];
+    let payloadChunkSize = Math.floor(deinterleaved.length / REDUNDANCY);
+    for (let i = 0; i < payloadChunkSize; i++) {
+        let votes = 0;
+        for (let r = 0; r < REDUNDANCY; r++) votes += deinterleaved[i + r * payloadChunkSize];
+        payloadVoted.push(votes > Math.floor(REDUNDANCY / 2) ? 1 : 0);
+    }
+    
+    let payloadRaw = hammingDecode(payloadVoted);
+    
+    return bitsToText(payloadRaw.slice(0, payloadLength));
 }
 
 function compute2DDCT(input) {
