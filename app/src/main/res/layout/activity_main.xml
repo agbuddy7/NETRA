@@ -1,57 +1,88 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="#000000"
-    android:padding="16dp"
     tools:context=".MainActivity">
 
-    <!-- Status Text -->
-    <TextView
-        android:id="@+id/statusText"
+    <!-- Camera Preview -->
+    <androidx.camera.view.PreviewView
+        android:id="@+id/viewFinder"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Status Information Overlay -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Waiting for new photos..."
-        android:textColor="#FFFFFF"
-        android:textSize="16sp"
-        android:gravity="center"
-        android:paddingVertical="8dp" />
+        android:orientation="vertical"
+        android:background="#88000000"
+        android:padding="16dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
 
-    <!-- Resolution Text -->
-    <TextView
-        android:id="@+id/resolutionText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="No photo captured yet"
-        android:textColor="#CCCCCC"
-        android:textSize="14sp"
-        android:gravity="center"
-        android:paddingVertical="4dp" />
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Initializing camera..."
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:gravity="center"
+            android:paddingVertical="4dp" />
 
-    <!-- Photo Counter -->
-    <TextView
-        android:id="@+id/photoCountText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Photos captured: 0"
-        android:textColor="#AAAAAA"
-        android:textSize="12sp"
-        android:gravity="center"
-        android:paddingVertical="4dp" />
+        <TextView
+            android:id="@+id/resolutionText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Ready"
+            android:textColor="#CCCCCC"
+            android:textSize="14sp"
+            android:gravity="center"
+            android:paddingVertical="4dp" />
 
-    <!-- Image Display -->
+        <TextView
+            android:id="@+id/photoCountText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Photos captured: 0"
+            android:textColor="#AAAAAA"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:paddingVertical="4dp" />
+    </LinearLayout>
+
+    <!-- Capture Button -->
+    <Button
+        android:id="@+id/captureButton"
+        android:layout_width="80dp"
+        android:layout_height="80dp"
+        android:layout_marginBottom="32dp"
+        android:background="@android:drawable/ic_menu_camera"
+        android:backgroundTint="#FFFFFF"
+        android:elevation="2dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <!-- Optional Thumbnail ImageView to show latest capture temporarily -->
     <ImageView
         android:id="@+id/imageView"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="16dp"
-        android:scaleType="fitCenter"
-        android:background="#222222"
-        android:contentDescription="Captured photo"
-        android:adjustViewBounds="true" />
+        android:layout_width="80dp"
+        android:layout_height="80dp"
+        android:layout_margin="32dp"
+        android:scaleType="centerCrop"
+        android:background="#44000000"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 
-</LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>

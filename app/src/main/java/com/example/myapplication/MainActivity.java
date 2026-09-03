@@ -1,21 +1,17 @@
 package com.example.myapplication;
 
 import android.Manifest;
-import android.content.ContentResolver;
-import android.content.ContentUris;
+import android.content.ContentValues;
 import android.content.pm.PackageManager;
-import android.database.ContentObserver;
-import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.provider.MediaStore;
 import android.util.Log;
+import android.view.View;
+import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -23,56 +19,63 @@ import android.widget.Toast;
 import androidx.activity.EdgeToEdge;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.camera.core.CameraSelector;
+import androidx.camera.core.ImageCapture;
+import androidx.camera.core.ImageCaptureException;
+import androidx.camera.core.Preview;
+import androidx.camera.lifecycle.ProcessCameraProvider;
+import androidx.camera.view.PreviewView;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import com.google.common.util.concurrent.ListenableFuture;
+
+import org.json.JSONObject;
+
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.InputStream;
-import java.io.OutputStreamWriter;
+import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
-
-import org.json.JSONArray;
-import org.json.JSONObject;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
-    private ContentObserver imageObserver;
+    private static final String CAPTURED_BY = "agbuddy7";
+
+    private PreviewView viewFinder;
     private ImageView imageView;
     private TextView statusText;
     private TextView resolutionText;
     private TextView photoCountText;
-    private long lastImageId = -1;
-    private Handler mainHandler;
+    private Button captureButton;
+
+    private ImageCapture imageCapture;
+    private ExecutorService cameraExecutor;
     private int photosCapturedCount = 0;
 
-    // Queue system
-    private BlockingQueue<Long> imageQueue;
-    private ExecutorService queueProcessor;
-    private volatile boolean isProcessorRunning = false;
-
-    // Settings
-    private static final String CAPTURED_BY = "agbuddy7";
-
-    private final ActivityResultLauncher<String> requestPermissionLauncher =
-            registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
-                if (isGranted) {
-                    updateStatus("Permission granted. Listening for new photos...");
-                    initializeLastImageId();
-                    registerImageObserver();
+    private final ActivityResultLauncher<String[]> requestPermissionsLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), permissions -> {
+                boolean allGranted = true;
+                for (Boolean isGranted : permissions.values()) {
+                    if (!isGranted) {
+                        allGranted = false;
+                        break;
+                    }
+                }
+                
+                if (allGranted) {
+                    startCamera();
                 } else {
-                    updateStatus("Permission denied. Cannot detect new photos.");
-                    Toast.makeText(this, "Permission denied.", Toast.LENGTH_LONG).show();
+                    updateStatus("Permissions denied. Cannot use camera.");
+                    Toast.makeText(this, "Permissions not granted by the user.", Toast.LENGTH_SHORT).show();
                 }
             });
 
@@ -88,210 +91,115 @@ public class MainActivity extends AppCompatActivity {
             return insets;
         });
 
+        viewFinder = findViewById(R.id.viewFinder);
         imageView = findViewById(R.id.imageView);
         statusText = findViewById(R.id.statusText);
         resolutionText = findViewById(R.id.resolutionText);
         photoCountText = findViewById(R.id.photoCountText);
-        mainHandler = new Handler(Looper.getMainLooper());
+        captureButton = findViewById(R.id.captureButton);
 
-        imageQueue = new LinkedBlockingQueue<>();
-        queueProcessor = Executors.newSingleThreadExecutor();
+        cameraExecutor = Executors.newSingleThreadExecutor();
 
-        Log.d(TAG, "Image Provenance System - 3 Vertical Strands (Raw Pixel Data)");
+        captureButton.setOnClickListener(v -> takePhoto());
 
-        // Debug network permissions and security policy
-        checkNetworkPermissions();
-
-        startQueueProcessor();
-        checkPermissionAndRegisterObserver();
-    }
-
-    private void updateStatus(String message) {
-        runOnUiThread(() -> {
-            statusText.setText(message);
-            Log.d(TAG, message);
-        });
-    }
-
-    private void updateResolution(String resolution) {
-        runOnUiThread(() -> resolutionText.setText(resolution));
-    }
-
-    private void updatePhotoCount() {
-        runOnUiThread(() -> {
-            photoCountText.setText(String.format("Photos: %d | Queue: %d",
-                    photosCapturedCount, imageQueue.size()));
-        });
-    }
-
-    private void checkPermissionAndRegisterObserver() {
-        String permission = getRequiredPermission();
-
-        if (ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED) {
-            updateStatus("Listening for new photos...");
-            initializeLastImageId();
-            registerImageObserver();
+        if (allPermissionsGranted()) {
+            startCamera();
         } else {
-            updateStatus("Requesting permission...");
-            requestPermissionLauncher.launch(permission);
+            requestPermissionsLauncher.launch(getRequiredPermissions());
         }
     }
 
-    private String getRequiredPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            return Manifest.permission.READ_MEDIA_IMAGES;
-        } else {
-            return Manifest.permission.READ_EXTERNAL_STORAGE;
-        }
-    }
-
-    private void initializeLastImageId() {
-        try {
-            ContentResolver contentResolver = getContentResolver();
-            Uri collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
-            String[] projection = {MediaStore.Images.Media._ID};
-            String sortOrder = MediaStore.Images.Media.DATE_ADDED + " DESC";
-
-            try (Cursor cursor = contentResolver.query(collection, projection, null, null, sortOrder)) {
-                if (cursor != null && cursor.moveToFirst()) {
-                    int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID);
-                    lastImageId = cursor.getLong(idColumn);
-                    Log.d(TAG, "Initialized with last image ID: " + lastImageId);
-                }
+    private boolean allPermissionsGranted() {
+        for (String permission : getRequiredPermissions()) {
+            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                return false;
             }
-        } catch (Exception e) {
-            Log.e(TAG, "Error initializing last image ID", e);
+        }
+        return true;
+    }
+
+    private String[] getRequiredPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return new String[]{Manifest.permission.CAMERA, Manifest.permission.READ_MEDIA_IMAGES};
+        } else {
+            return new String[]{Manifest.permission.CAMERA, Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE};
         }
     }
 
-    private void registerImageObserver() {
-        try {
-            ContentResolver contentResolver = getContentResolver();
+    private void startCamera() {
+        ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
 
-            imageObserver = new ContentObserver(mainHandler) {
-                @Override
-                public void onChange(boolean selfChange) {
-                    super.onChange(selfChange);
-                    onMediaStoreChange();
-                }
-
-                @Override
-                public void onChange(boolean selfChange, Uri uri) {
-                    super.onChange(selfChange, uri);
-                    onMediaStoreChange();
-                }
-            };
-
-            contentResolver.registerContentObserver(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    true,
-                    imageObserver
-            );
-
-            Log.d(TAG, "Image observer registered");
-
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to register image observer", e);
-        }
-    }
-
-    private void onMediaStoreChange() {
-        mainHandler.postDelayed(() -> checkForNewImage(), 800);
-    }
-
-    private void checkForNewImage() {
-        new Thread(() -> {
+        cameraProviderFuture.addListener(() -> {
             try {
-                ContentResolver contentResolver = getContentResolver();
-                if (contentResolver == null) return;
+                ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
 
-                Uri collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
-                String[] projection = {MediaStore.Images.Media._ID};
-                String sortOrder = MediaStore.Images.Media._ID + " DESC";
+                Preview preview = new Preview.Builder().build();
+                preview.setSurfaceProvider(viewFinder.getSurfaceProvider());
 
-                try (Cursor cursor = contentResolver.query(collection, projection, null, null, sortOrder)) {
-                    if (cursor != null && cursor.moveToFirst()) {
-                        int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID);
-                        long imageId = cursor.getLong(idColumn);
+                imageCapture = new ImageCapture.Builder().build();
 
-                        if (imageId > lastImageId) {
-                            Log.d(TAG, "🔔 New image detected! ID: " + imageId);
-                            lastImageId = imageId;
+                CameraSelector cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA;
 
-                            if (imageQueue.offer(imageId)) {
-                                runOnUiThread(() -> updatePhotoCount());
-                            }
+                cameraProvider.unbindAll();
+                cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture);
+
+                updateStatus("Camera ready");
+
+            } catch (Exception exc) {
+                Log.e(TAG, "Use case binding failed", exc);
+                updateStatus("Failed to start camera");
+            }
+        }, ContextCompat.getMainExecutor(this));
+    }
+
+    private void takePhoto() {
+        if (imageCapture == null) return;
+
+        updateStatus("Capturing photo...");
+        captureButton.setEnabled(false);
+
+        String name = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+        ContentValues contentValues = new ContentValues();
+        contentValues.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+        contentValues.put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg");
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+            contentValues.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/CameraX-Image");
+        }
+
+        ImageCapture.OutputFileOptions outputOptions = new ImageCapture.OutputFileOptions.Builder(
+                getContentResolver(),
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                contentValues
+        ).build();
+
+        imageCapture.takePicture(
+                outputOptions,
+                ContextCompat.getMainExecutor(this),
+                new ImageCapture.OnImageSavedCallback() {
+                    @Override
+                    public void onImageSaved(@NonNull ImageCapture.OutputFileResults output) {
+                        Uri savedUri = output.getSavedUri();
+                        if (savedUri != null) {
+                            Log.d(TAG, "Photo capture succeeded: " + savedUri);
+                            updateStatus("Processing photo...");
+                            
+                            long imageId = System.currentTimeMillis();
+                            
+                            new Thread(() -> processAndWatermarkImage(savedUri, name + ".jpg", imageId)).start();
                         }
                     }
+
+                    @Override
+                    public void onError(@NonNull ImageCaptureException exc) {
+                        Log.e(TAG, "Photo capture failed: " + exc.getMessage(), exc);
+                        updateStatus("Capture failed!");
+                        captureButton.setEnabled(true);
+                    }
                 }
-            } catch (Exception e) {
-                Log.e(TAG, "Error checking for new image", e);
-            }
-        }).start();
+        );
     }
 
-    private void startQueueProcessor() {
-        isProcessorRunning = true;
-
-        queueProcessor.execute(() -> {
-            Log.d(TAG, "📋 Queue processor started");
-
-            while (isProcessorRunning) {
-                try {
-                    Long imageId = imageQueue.take();
-                    Log.d(TAG, "🔄 Processing image ID: " + imageId);
-                    runOnUiThread(() -> updateStatus("Processing photo..."));
-
-                    processImageById(imageId);
-                    Thread.sleep(300);
-
-                } catch (InterruptedException e) {
-                    break;
-                } catch (Exception e) {
-                    Log.e(TAG, "Error in queue processor", e);
-                }
-            }
-        });
-    }
-
-    private void processImageById(long imageId) {
-        try {
-            ContentResolver contentResolver = getContentResolver();
-            if (contentResolver == null) return;
-
-            Uri collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
-            String[] projection = {
-                    MediaStore.Images.Media._ID,
-                    MediaStore.Images.Media.DISPLAY_NAME,
-                    MediaStore.Images.Media.WIDTH,
-                    MediaStore.Images.Media.HEIGHT,
-                    MediaStore.Images.Media.SIZE
-            };
-
-            String selection = MediaStore.Images.Media._ID + " = ?";
-            String[] selectionArgs = {String.valueOf(imageId)};
-
-            try (Cursor cursor = contentResolver.query(collection, projection, selection, selectionArgs, null)) {
-                if (cursor != null && cursor.moveToFirst()) {
-                    String displayName = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME));
-                    int width = cursor.getInt(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.WIDTH));
-                    int height = cursor.getInt(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.HEIGHT));
-                    long fileSize = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE));
-
-                    photosCapturedCount++;
-                    Uri imageUri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, imageId);
-
-                    Log.d(TAG, "Processing: " + displayName);
-
-                    processAndWatermarkImage(imageUri, displayName, width, height, fileSize, imageId);
-                }
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error processing image", e);
-        }
-    }
-
-    private void processAndWatermarkImage(Uri imageUri, String displayName, int width, int height, long fileSize, long imageId) {
+    private void processAndWatermarkImage(Uri imageUri, String displayName, long imageId) {
         try {
             InputStream inputStream = getContentResolver().openInputStream(imageUri);
             if (inputStream == null) return;
@@ -304,7 +212,6 @@ public class MainActivity extends AppCompatActivity {
             int imageWidth = options.outWidth;
             int imageHeight = options.outHeight;
 
-            // Load full resolution
             inputStream = getContentResolver().openInputStream(imageUri);
             if (inputStream == null) return;
 
@@ -315,30 +222,29 @@ public class MainActivity extends AppCompatActivity {
             Bitmap fullBitmap = BitmapFactory.decodeStream(inputStream, null, options);
             inputStream.close();
 
-            if (fullBitmap == null) return;
+            if (fullBitmap == null) {
+                runOnUiThread(() -> captureButton.setEnabled(true));
+                return;
+            }
+            
+            long fileSize = -1;
 
-            int actualWidth = width > 0 ? width : imageWidth;
-            int actualHeight = height > 0 ? height : imageHeight;
-
-            // Extract 3 vertical strands
             runOnUiThread(() -> updateStatus("Embedding Invisible Watermark..."));
             String payload = "proofKrypt-" + imageId;
             Bitmap watermarkedBitmap = WatermarkUtils.embedDCTWatermark(fullBitmap, payload);
             
-            // Save watermarked bitmap back to the original Uri (overwrite)
             try {
-                // Open the original image Uri for writing ("wt" mode truncates existing content)
-                java.io.OutputStream out = getContentResolver().openOutputStream(imageUri, "wt");
+                OutputStream out = getContentResolver().openOutputStream(imageUri, "wt");
                 if (out != null) {
-                    // MUST be saved as PNG to preserve the exact DCT pixel values!
                     watermarkedBitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
                     out.flush();
                     out.close();
                     Log.d(TAG, "Successfully replaced the original photo with the watermarked version.");
+                    
+                    fileSize = fullBitmap.getByteCount();
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Failed to replace original photo (Scoped Storage permission issue?)", e);
-                // Fallback to saving in the Pictures folder if overwrite fails
+                Log.e(TAG, "Failed to replace original photo", e);
                 File directory = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES);
                 File outFile = new File(directory, "watermarked_" + imageId + ".png");
                 try {
@@ -347,36 +253,40 @@ public class MainActivity extends AppCompatActivity {
                     fallbackOut.flush();
                     fallbackOut.close();
                     
-                    // Force the Android Media Scanner to index the new file so it appears in the Gallery immediately!
                     android.media.MediaScannerConnection.scanFile(this, 
                         new String[]{outFile.getAbsolutePath()}, 
                         new String[]{"image/png"}, 
                         null);
                         
-                    Log.d(TAG, "Fallback save successful and scanned into gallery.");
+                    Log.d(TAG, "Fallback save successful.");
+                    fileSize = outFile.length();
                 } catch (Exception ex) {
                     Log.e(TAG, "Fallback save failed", ex);
                 }
             }
 
-            // Send to database
             runOnUiThread(() -> updateStatus("Generating Signature..."));
             sendSignatureToDatabase(imageId, null);
 
-            // Create display bitmap
             Bitmap displayBitmap = createDisplayBitmap(imageUri);
 
-            // Update UI
+            photosCapturedCount++;
+            
+            final long finalFileSize = fileSize;
+            
             runOnUiThread(() -> {
                 try {
+                    imageView.setVisibility(View.VISIBLE);
                     imageView.setImageDrawable(null);
                     imageView.setImageBitmap(displayBitmap);
                     imageView.invalidate();
 
-                    updateStatus("Photo: " + displayName);
+                    updateStatus("Ready");
                     updateResolution(String.format("%dx%d | %.2f MB",
-                            actualWidth, actualHeight, fileSize / (1024.0 * 1024.0)));
+                            imageWidth, imageHeight, finalFileSize / (1024.0 * 1024.0)));
                     updatePhotoCount();
+                    
+                    captureButton.setEnabled(true);
 
                     Toast.makeText(this, "Photo #" + photosCapturedCount + " - Watermark embedded!", Toast.LENGTH_SHORT).show();
 
@@ -393,11 +303,10 @@ public class MainActivity extends AppCompatActivity {
             }
 
         } catch (Exception e) {
-            Log.e(TAG, "Error loading image", e);
+            Log.e(TAG, "Error processing image", e);
+            runOnUiThread(() -> captureButton.setEnabled(true));
         }
     }
-
-    // Removed legacy strand methods
 
     private Bitmap createDisplayBitmap(Uri imageUri) {
         try {
@@ -439,143 +348,82 @@ public class MainActivity extends AppCompatActivity {
     private void sendSignatureToDatabase(long imageId, String constellationJson) {
         new Thread(() -> {
             try {
-                Log.d(TAG, "🌐 Uploading to Render Database...");
-                java.net.URL url = new java.net.URL("https://netra-1.onrender.com/register");
+                Log.d(TAG, "Uploading to Supabase...");
+                // Supabase REST API endpoint for the 'signatures' table
+                java.net.URL url = new java.net.URL("https://zvddeaxqkygtppwvlycn.supabase.co/rest/v1/signatures");
                 java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
-                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8"); // Fixed charset syntax
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
                 conn.setRequestProperty("Accept", "application/json");
+                // Add Supabase authentication headers
+                conn.setRequestProperty("apikey", "sb_publishable_UW7LOZp-os9-TIO0P0NAiA_0PvLfZrJ");
+                conn.setRequestProperty("Authorization", "Bearer sb_publishable_UW7LOZp-os9-TIO0P0NAiA_0PvLfZrJ");
+                conn.setRequestProperty("Prefer", "return=minimal"); // Don't need the inserted row back
                 conn.setDoOutput(true);
-                conn.setDoInput(true); // Explicitly enable input
+                conn.setDoInput(true);
                 conn.setConnectTimeout(15000);
 
-                // 1. Timestamp
                 SimpleDateFormat isoFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
                 isoFormat.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
                 String isoTimestamp = isoFormat.format(new Date());
 
-                // 2. Build JSON
                 JSONObject jsonBody = new JSONObject();
                 jsonBody.put("image_id", "ANDROID-" + imageId);
                 jsonBody.put("author", CAPTURED_BY);
                 jsonBody.put("device_model", Build.MODEL);
                 jsonBody.put("timestamp", isoTimestamp);
-
-                // CRITICAL: Updated payload format for DCT watermark system
-                jsonBody.put("watermark_payload", "proofKrypt-" + imageId);
+                // The column in Supabase is constellation_data
+                jsonBody.put("constellation_data", "proofKrypt-" + imageId);
 
                 String jsonInputString = jsonBody.toString();
 
-                // Log payload to be sure
-                Log.d("UPLOAD_DEBUG", "Payload: " + jsonInputString);
-
-                // 3. Send
                 byte[] input = jsonInputString.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                // Set content length to help the server parser
                 conn.setRequestProperty("Content-Length", String.valueOf(input.length));
 
                 try(java.io.OutputStream os = conn.getOutputStream()) {
                     os.write(input, 0, input.length);
-                    os.flush(); // Ensure everything is written
+                    os.flush();
                 }
 
                 int code = conn.getResponseCode();
-                Log.d(TAG, "💎 Response Code: " + code);
+                Log.d(TAG, "Response Code: " + code);
 
                 if(code >= 200 && code < 300) {
-                    // Success
-                    // ...
+                    Log.d(TAG, "Successfully registered signature with Supabase");
                 } else {
-                    // Error reading
                     java.io.InputStream err = conn.getErrorStream();
                     if(err != null) {
                         java.util.Scanner s = new java.util.Scanner(err).useDelimiter("\\A");
-                        Log.e(TAG, "❌ Server Rejected: " + (s.hasNext() ? s.next() : ""));
+                        Log.e(TAG, "Supabase Rejected: " + (s.hasNext() ? s.next() : ""));
                     }
                 }
             } catch (Exception e) {
-                Log.e(TAG, "❌ Error: " + e.getMessage());
+                Log.e(TAG, "Error: " + e.getMessage());
                 e.printStackTrace();
             }
         }).start();
     }
 
-    private void testNetworkConnectivity() {
-        try {
-            // Test basic internet connectivity
-            Log.d(TAG, "🔍 Testing network connectivity...");
-
-            // Test DNS resolution for our domain
-            java.net.InetAddress[] addresses = java.net.InetAddress.getAllByName("netra-1.onrender.com");
-            Log.d(TAG, "✅ DNS Resolution Success: " + addresses[0].getHostAddress());
-
-        } catch (java.net.UnknownHostException e) {
-            Log.e(TAG, "❌ DNS Resolution Failed for netra-1.onrender.com");
-            Log.e(TAG, "🔧 NETWORK ISSUE: " + e.getMessage());
-
-            // Try resolving a known good domain
-            try {
-                java.net.InetAddress.getAllByName("google.com");
-                Log.d(TAG, "✅ Internet works - DNS issue specific to our domain");
-                runOnUiThread(() -> Toast.makeText(this, "❌ Server domain blocked/filtered", Toast.LENGTH_LONG).show());
-            } catch (Exception e2) {
-                Log.e(TAG, "❌ No internet connectivity at all");
-                runOnUiThread(() -> Toast.makeText(this, "❌ No Internet Connection", Toast.LENGTH_LONG).show());
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "❌ Network test error: " + e.getMessage());
-        }
+    private void updateStatus(String message) {
+        runOnUiThread(() -> {
+            statusText.setText(message);
+            Log.d(TAG, message);
+        });
     }
 
-    private void checkNetworkPermissions() {
-        // Check if Internet permission is granted
-        if (checkSelfPermission(android.Manifest.permission.INTERNET) == PackageManager.PERMISSION_GRANTED) {
-            Log.d(TAG, "✅ INTERNET permission granted");
-        } else {
-            Log.e(TAG, "❌ INTERNET permission DENIED");
-        }
+    private void updateResolution(String resolution) {
+        runOnUiThread(() -> resolutionText.setText(resolution));
+    }
 
-        // Check network state permission
-        if (checkSelfPermission(android.Manifest.permission.ACCESS_NETWORK_STATE) == PackageManager.PERMISSION_GRANTED) {
-            Log.d(TAG, "✅ NETWORK_STATE permission granted");
-        } else {
-            Log.w(TAG, "⚠️ NETWORK_STATE permission not granted (optional)");
-        }
-
-        // Check if cleartext traffic is allowed
-        try {
-            boolean cleartextPermitted = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_USES_CLEARTEXT_TRAFFIC) != 0;
-            Log.d(TAG, "🔒 Cleartext traffic permitted: " + cleartextPermitted);
-            } catch (Exception e) {
-            Log.e(TAG, "❌ Error checking cleartext policy: " + e.getMessage());
-        }
+    private void updatePhotoCount() {
+        runOnUiThread(() -> {
+            photoCountText.setText(String.format("Photos: %d", photosCapturedCount));
+        });
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-
-        isProcessorRunning = false;
-        if (queueProcessor != null) {
-            queueProcessor.shutdownNow();
-        }
-
-        if (imageObserver != null) {
-            try {
-                getContentResolver().unregisterContentObserver(imageObserver);
-                Log.d(TAG, "Observer unregistered");
-            } catch (Exception e) {
-                Log.e(TAG, "Error unregistering observer", e);
-            }
-        }
-    }
-
-    @Override
-    protected void onResume() {
-        super.onResume();
-        initializeLastImageId();
-        updateStatus("Listening for new photos...");
-        updateResolution("No photo captured yet");
-        updatePhotoCount();
+        cameraExecutor.shutdown();
     }
 }
