@@ -63,26 +63,44 @@ async function startVerification() {
         const canvas = await loadImageToCanvas(uploadedImage);
         console.log('Image loaded:', canvas.width, 'x', canvas.height);
         
-        // Extract watermark (extracting up to 24 characters = 192 bits)
-        let extractedPayload = await extractDCTWatermark(canvas, 192);
+        // Extract watermark (v2: auto-detects length from embedded header)
+        let extractedPayload = await extractDCTWatermark(canvas);
         
-        // Clean up extracted string (remove non-printable characters)
-        extractedPayload = extractedPayload.replace(/[^\x20-\x7E]/g, '');
-        console.log("Extracted clean payload:", extractedPayload);
+        console.log("Extracted payload:", extractedPayload);
         
         document.querySelector('#loading p').textContent = "Querying Global Database...";
         
-        // Query Database
-        const response = await fetch('https://netra-1.onrender.com/verify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ signature: extractedPayload })
+        // Query Supabase Directly
+        const url = `https://zvddeaxqkygtppwvlycn.supabase.co/rest/v1/signatures?constellation_data=eq.${encodeURIComponent(extractedPayload)}&select=*&limit=1`;
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { 
+                'apikey': 'sb_publishable_UW7LOZp-os9-TIO0P0NAiA_0PvLfZrJ',
+                'Authorization': 'Bearer sb_publishable_UW7LOZp-os9-TIO0P0NAiA_0PvLfZrJ',
+                'Accept': 'application/json'
+            }
         });
         
-        const data = await response.json();
-        console.log("Database response:", data);
+        const rows = await response.json();
+        console.log("Supabase response:", rows);
         
-        displayResults(data.match, extractedPayload, data);
+        const isMatch = rows && rows.length > 0;
+        let dataToDisplay = null;
+        
+        if (isMatch) {
+            const match = rows[0];
+            dataToDisplay = {
+                metadata: {
+                    author: match.author,
+                    device: match.device_model,
+                    original_timestamp: match.timestamp,
+                    image_id: match.image_id,
+                    registered_at: match.created_at || match.timestamp
+                }
+            };
+        }
+        
+        displayResults(isMatch, extractedPayload, dataToDisplay);
         
     } catch (error) {
         console.error('Verification error:', error);
@@ -115,31 +133,44 @@ function loadImageToCanvas(file) {
 }
 
 // ----------------------------------------------------------------------------
-// DCT MATH - Required to extract the invisible watermark
+// DCT MATH v2 - Matches WatermarkUtils.java and dct_watermark.py exactly
 // ----------------------------------------------------------------------------
-async function extractDCTWatermark(canvas, bitLength) {
-    const ALPHA = 30.0;
+const ALPHA = 30.0;
+const COEFF_U = 3;
+const COEFF_V = 1;
+const REDUNDANCY = 7;
+const MAGIC_BITS = [
+    0,1,0,1,0,0,0,0,  // 0x50 = 'P'
+    0,1,0,0,1,0,1,1   // 0x4B = 'K'
+];
+
+// Precomputed cosine table
+const COS_TABLE = [];
+for (let n = 0; n < 8; n++) {
+    COS_TABLE[n] = [];
+    for (let k = 0; k < 8; k++) {
+        COS_TABLE[n][k] = Math.cos((2.0 * n + 1.0) * k * Math.PI / 16.0);
+    }
+}
+const C0 = 1.0 / Math.sqrt(2.0);
+
+async function extractDCTWatermark(canvas) {
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const width = canvas.width;
     const height = canvas.height;
     
-    // Ensure dimensions are multiples of 8 (just like JPEG compression)
     const padWidth = width - (width % 8);
     const padHeight = height - (height % 8);
     
     const imageData = ctx.getImageData(0, 0, padWidth, padHeight);
     const pixels = imageData.data;
     
-    const extractedBits = [];
-    let idx = 0;
+    // Step 1: Extract raw bits from every block
+    const rawBitsPerBlock = [];
     
     for (let y = 0; y < padHeight; y += 8) {
         for (let x = 0; x < padWidth; x += 8) {
-            if (idx >= bitLength) {
-                return bitsToText(extractedBits);
-            }
-            
-            // Build 8x8 luminance block
+            // Build 8x8 luminance block using shared formula
             let block = [];
             for (let i = 0; i < 8; i++) {
                 block[i] = [];
@@ -148,49 +179,100 @@ async function extractDCTWatermark(canvas, bitLength) {
                     let r = pixels[pIdx];
                     let g = pixels[pIdx+1];
                     let b = pixels[pIdx+2];
-                    // Y = 0.299R + 0.587G + 0.114B (Extract Luminance)
                     block[i][j] = 0.299 * r + 0.587 * g + 0.114 * b;
                 }
             }
             
             let dctBlock = compute2DDCT(block);
-            let coeff = dctBlock[4][4];
+            let coeff = dctBlock[COEFF_U][COEFF_V];
             let q = Math.round(coeff / ALPHA);
             
-            if (q % 2 === 0) {
-                extractedBits.push(0);
-            } else {
-                extractedBits.push(1);
-            }
-            
-            idx++;
+            rawBitsPerBlock.push((q % 2 === 0) ? 0 : 1);
         }
     }
     
-    // Log the raw binary sequence for debugging
-    console.log("Raw extracted bits (first 64):", extractedBits.slice(0, 64).join(''));
+    // Step 2: Majority voting to decode logical bits
+    const logicalBits = [];
+    for (let i = 0; i < rawBitsPerBlock.length; i += REDUNDANCY) {
+        let chunk = rawBitsPerBlock.slice(i, i + REDUNDANCY);
+        if (chunk.length < REDUNDANCY) break;
+        let ones = chunk.reduce((a, b) => a + b, 0);
+        logicalBits.push(ones > Math.floor(REDUNDANCY / 2) ? 1 : 0);
+    }
     
-    return bitsToText(extractedBits);
+    // Step 3: Check magic marker
+    if (logicalBits.length < 32) {
+        console.log("Image too small for watermark header");
+        return "";
+    }
+    
+    const magic = logicalBits.slice(0, 16);
+    let magicMatch = true;
+    for (let i = 0; i < 16; i++) {
+        if (magic[i] !== MAGIC_BITS[i]) {
+            magicMatch = false;
+            break;
+        }
+    }
+    
+    if (!magicMatch) {
+        console.log("No watermark detected (magic marker mismatch)");
+        console.log("Expected:", MAGIC_BITS.join(''));
+        console.log("Got:     ", magic.join(''));
+        return "";
+    }
+    
+    console.log("✅ Magic marker 'PK' found!");
+    
+    // Step 4: Read length header
+    const lengthBits = logicalBits.slice(16, 32);
+    let payloadLength = 0;
+    for (let b of lengthBits) {
+        payloadLength = (payloadLength << 1) | b;
+    }
+    console.log(`Payload length: ${payloadLength} bits (${Math.floor(payloadLength / 8)} chars)`);
+    
+    // Step 5: Extract payload
+    const totalNeeded = 32 + payloadLength;
+    let payloadBits;
+    if (logicalBits.length < totalNeeded) {
+        console.log("Warning: truncated payload");
+        payloadBits = logicalBits.slice(32);
+    } else {
+        payloadBits = logicalBits.slice(32, totalNeeded);
+    }
+    
+    return bitsToText(payloadBits);
 }
 
 function compute2DDCT(input) {
+    // Separable 2D DCT using precomputed cosine table
+    let temp = [];
     let output = [];
-    let c0 = 1.0 / Math.sqrt(2.0);
-    
-    for (let u = 0; u < 8; u++) {
-        output[u] = [];
-        for (let v = 0; v < 8; v++) {
+
+    // 1D DCT on rows
+    for (let i = 0; i < 8; i++) {
+        temp[i] = [];
+        for (let k = 0; k < 8; k++) {
             let sum = 0.0;
-            for (let i = 0; i < 8; i++) {
-                for (let j = 0; j < 8; j++) {
-                    sum += input[i][j] * 
-                           Math.cos((2.0 * i + 1.0) * u * Math.PI / 16.0) * 
-                           Math.cos((2.0 * j + 1.0) * v * Math.PI / 16.0);
-                }
+            for (let n = 0; n < 8; n++) {
+                sum += input[i][n] * COS_TABLE[n][k];
             }
-            let cu = (u === 0) ? c0 : 1.0;
-            let cv = (v === 0) ? c0 : 1.0;
-            output[u][v] = 0.25 * cu * cv * sum;
+            let ck = (k === 0) ? C0 : 1.0;
+            temp[i][k] = 0.5 * ck * sum;
+        }
+    }
+
+    // 1D DCT on columns
+    for (let k = 0; k < 8; k++) {
+        output[k] = [];
+        for (let j = 0; j < 8; j++) {
+            let sum = 0.0;
+            for (let n = 0; n < 8; n++) {
+                sum += temp[n][j] * COS_TABLE[n][k];
+            }
+            let ck = (k === 0) ? C0 : 1.0;
+            output[k][j] = 0.5 * ck * sum;
         }
     }
     return output;

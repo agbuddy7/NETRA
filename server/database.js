@@ -59,6 +59,21 @@ if (process.env.SUPABASE_URL) {
         return data; 
     };
 
+    // FIND BY PAYLOAD (indexed lookup)
+    exports.findByPayload = async (payload) => {
+        const { data, error } = await supabase
+            .from('signatures')
+            .select('*')
+            .eq('constellation_data', payload)
+            .limit(1);
+
+        if (error) {
+            console.error("Supabase findByPayload Error:", error);
+            throw new Error(error.message);
+        }
+        return (data && data.length > 0) ? data[0] : null;
+    };
+
     // No initSchema needed for Supabase client, user manages it via Dashboard
 
 } else {
@@ -192,6 +207,22 @@ if (process.env.SUPABASE_URL) {
                 sqliteDb.all("SELECT * FROM signatures", [], (err, rows) => {
                     if (err) reject(err);
                     else resolve(rows);
+                });
+            }
+        });
+    };
+
+    // FIND BY PAYLOAD (indexed lookup — O(1) instead of scanning all rows)
+    exports.findByPayload = (payload) => {
+        return new Promise((resolve, reject) => {
+            if (dbType === 'postgres') {
+                pgClient.query('SELECT * FROM signatures WHERE constellation_data = $1 LIMIT 1', [payload])
+                    .then(res => resolve(res.rows.length > 0 ? res.rows[0] : null))
+                    .catch(err => reject(err));
+            } else {
+                sqliteDb.get("SELECT * FROM signatures WHERE constellation_data = ? LIMIT 1", [payload], (err, row) => {
+                    if (err) reject(err);
+                    else resolve(row || null);
                 });
             }
         });

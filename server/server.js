@@ -55,33 +55,18 @@ app.post('/verify', async (req, res) => {
     }
 
     try {
-        // Fetch all signatures to compare
-        const rows = await db.getAllSignatures();
-        
-        let bestMatch = null;
+        // Direct indexed lookup instead of scanning all rows
+        const match = await db.findByPayload(signature);
 
-        // --- THE COMPARISON LOGIC (Server Side) ---
-        rows.forEach(row => {
-            // Strip surrounding quotes if they exist (depending on how it was saved)
-            let dbPayload = row.constellation_data || "";
-            if (dbPayload.startsWith('"') && dbPayload.endsWith('"')) {
-                dbPayload = dbPayload.substring(1, dbPayload.length - 1);
-            }
-
-            if (signature === dbPayload) {
-                bestMatch = row;
-            }
-        });
-
-        if (bestMatch) {
+        if (match) {
             res.json({
                 match: true,
                 metadata: {
-                    author: bestMatch.author,
-                    device: bestMatch.device_model,
-                    original_timestamp: bestMatch.timestamp,
-                    image_id: bestMatch.image_id,
-                    registered_at: bestMatch.created_at || bestMatch.timestamp
+                    author: match.author,
+                    device: match.device_model,
+                    original_timestamp: match.timestamp,
+                    image_id: match.image_id,
+                    registered_at: match.created_at || match.timestamp
                 }
             });
         } else {
@@ -95,43 +80,6 @@ app.post('/verify', async (req, res) => {
         return res.status(500).json({ error: 'Database query failed' });
     }
 });
-
-
-// ==========================================
-// HELPER FUNCTIONS
-// ==========================================
-
-function calculateMatchScore(uploadedStars, dbStars) {
-    // Logic must match script.js verifyConstellation
-    let totalDist = 0;
-    let matchedStars = 0;
-    const gridPoints = uploadedStars.length; // Should be 64
-
-    for (let i = 0; i < gridPoints; i++) {
-        const u = uploadedStars[i];
-        
-        // Find matching star in DB record (by grid position)
-        const o = dbStars.find(s => s.row === u.row && s.col === u.col);
-
-        if (o) {
-            // Euclidean distance
-            const dist = Math.sqrt(Math.pow(u.x - o.x, 2) + Math.pow(u.y - o.y, 2));
-            totalDist += dist;
-            
-            // Tight match?
-            if (dist < 0.05) matchedStars++;
-        } else {
-            // Penalize missing stars (shouldn't happen if grid is same)
-            totalDist += 0.5; 
-        }
-    }
-
-    const avgDist = totalDist / gridPoints;
-    
-    // Scoring: 100 - (Error * Weight)
-    let score = Math.max(0, 100 - (avgDist * 500));
-    return score;
-}
 
 // Start Server
 app.listen(PORT, () => {
