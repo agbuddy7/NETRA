@@ -131,17 +131,19 @@ function loadImageToCanvas(file) {
         reader.readAsDataURL(file);
     });
 }
-
 // ----------------------------------------------------------------------------
-// DCT MATH v2 - Matches WatermarkUtils.java and dct_watermark.py exactly
+// DCT MATH v3 - Matches WatermarkUtils.java and v3_prototype.py exactly
 // ----------------------------------------------------------------------------
-const ALPHA = 30.0;
-const COEFF_U = 3;
-const COEFF_V = 1;
 const REDUNDANCY = 7;
+const PRNG_SEED = 123456789;
 const MAGIC_BITS = [
     0,1,0,1,0,0,0,0,  // 0x50 = 'P'
     0,1,0,0,1,0,1,1   // 0x4B = 'K'
+];
+const PAIRS = [
+    [[2,3], [3,2]],
+    [[1,3], [3,1]],
+    [[2,4], [4,2]]
 ];
 
 // Precomputed cosine table
@@ -154,6 +156,60 @@ for (let n = 0; n < 8; n++) {
 }
 const C0 = 1.0 / Math.sqrt(2.0);
 
+// --- LCG PRNG ---
+class PRNG {
+    constructor(seed) {
+        this.state = seed & 0xFFFFFFFF;
+    }
+    next() {
+        // Use BigInt to prevent 32-bit overflow issues in JS before modulo
+        this.state = Number((BigInt(this.state) * 1103515245n + 12345n) & 0x7FFFFFFFn);
+        return this.state;
+    }
+}
+
+// --- Hamming Decode ---
+function hammingDecode(encodedBits) {
+    let decoded = [];
+    for (let i = 0; i < encodedBits.length; i += 7) {
+        let chunk = encodedBits.slice(i, i + 7);
+        if (chunk.length < 7) break;
+        
+        let p1 = chunk[0], p2 = chunk[1], d1 = chunk[2];
+        let p3 = chunk[3], d2 = chunk[4], d3 = chunk[5], d4 = chunk[6];
+        
+        let s1 = p1 ^ d1 ^ d2 ^ d4;
+        let s2 = p2 ^ d1 ^ d3 ^ d4;
+        let s3 = p3 ^ d2 ^ d3 ^ d4;
+        
+        let errorPos = s1 * 1 + s2 * 2 + s3 * 4;
+        if (errorPos !== 0) {
+            chunk[errorPos - 1] ^= 1; // Correct error
+        }
+        decoded.push(chunk[2], chunk[4], chunk[5], chunk[6]);
+    }
+    return decoded;
+}
+
+// --- Deinterleave ---
+function deinterleave(bits, seed) {
+    let prng = new PRNG(seed);
+    let indices = Array.from({length: bits.length}, (_, i) => i);
+    
+    for (let i = indices.length - 1; i > 0; i--) {
+        let j = prng.next() % (i + 1);
+        let temp = indices[i];
+        indices[i] = indices[j];
+        indices[j] = temp;
+    }
+    
+    let unshuffled = new Array(bits.length);
+    for (let i = 0; i < indices.length; i++) {
+        unshuffled[i] = bits[indices[i]];
+    }
+    return unshuffled;
+}
+
 async function extractDCTWatermark(canvas) {
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     const width = canvas.width;
@@ -165,112 +221,123 @@ async function extractDCTWatermark(canvas) {
     const imageData = ctx.getImageData(0, 0, padWidth, padHeight);
     const pixels = imageData.data;
     
-    // Step 1: Extract raw bits from every block
-    const rawBitsPerBlock = [];
-    
-    for (let y = 0; y < padHeight; y += 8) {
-        for (let x = 0; x < padWidth; x += 8) {
-            // Build 8x8 luminance block using shared formula
-            let block = [];
-            for (let i = 0; i < 8; i++) {
-                block[i] = [];
-                for (let j = 0; j < 8; j++) {
-                    let pIdx = ((y + i) * padWidth + (x + j)) * 4;
-                    let r = pixels[pIdx];
-                    let g = pixels[pIdx+1];
-                    let b = pixels[pIdx+2];
-                    block[i][j] = 0.299 * r + 0.587 * g + 0.114 * b;
-                }
-            }
-            
-            let dctBlock = compute2DDCT(block);
-            let coeff = dctBlock[COEFF_U][COEFF_V];
-            let q = Math.round(coeff / ALPHA);
-            
-            rawBitsPerBlock.push((q % 2 === 0) ? 0 : 1);
+    let Y = new Float32Array(padWidth * padHeight);
+    for (let by = 0; by < padHeight; by++) {
+        for (let bx = 0; bx < padWidth; bx++) {
+            let pIdx = (by * padWidth + bx) * 4;
+            let r = pixels[pIdx];
+            let g = pixels[pIdx+1];
+            let b = pixels[pIdx+2];
+            Y[by * padWidth + bx] = 0.299 * r + 0.587 * g + 0.114 * b;
         }
     }
     
-    // Step 2: Majority voting to decode logical bits
-    const logicalBits = [];
-    for (let i = 0; i < rawBitsPerBlock.length; i += REDUNDANCY) {
-        let chunk = rawBitsPerBlock.slice(i, i + REDUNDANCY);
-        if (chunk.length < REDUNDANCY) break;
-        let ones = chunk.reduce((a, b) => a + b, 0);
-        logicalBits.push(ones > Math.floor(REDUNDANCY / 2) ? 1 : 0);
+    // Spreading logic
+    const numBlocks = (padWidth / 8) * (padHeight / 8);
+    let prng = new PRNG(PRNG_SEED);
+    let blockIndices = Array.from({length: numBlocks}, (_, i) => i);
+    for (let i = numBlocks - 1; i > 0; i--) {
+        let j = prng.next() % (i + 1);
+        let temp = blockIndices[i];
+        blockIndices[i] = blockIndices[j];
+        blockIndices[j] = temp;
     }
     
-    // Step 3: Check magic marker
-    if (logicalBits.length < 32) {
-        console.log("Image too small for watermark header");
-        return "";
+    // We don't know the exact payload length yet, but max length is e.g. 500 chars (500 * 8 = 4000 logical bits -> + 32 header = 4032 -> * 7/4 ECC = 7056 -> * 7 redundancy = 49392 blocks max). Let's just extract all available blocks up to max capacity.
+    const maxExtract = Math.min(numBlocks, 60000); // safety bound
+    let extractedBits = [];
+    let blocksW = padWidth / 8;
+    
+    for (let i = 0; i < maxExtract; i++) {
+        let bIdx = blockIndices[i];
+        let by = Math.floor(bIdx / blocksW) * 8;
+        let bx = (bIdx % blocksW) * 8;
+        
+        let block = [];
+        for (let r = 0; r < 8; r++) {
+            block[r] = [];
+            for (let c = 0; c < 8; c++) {
+                block[r][c] = Y[(by + r) * padWidth + (bx + c)];
+            }
+        }
+        
+        let dctBlock = compute2DDCT(block);
+        
+        let pair = PAIRS[i % PAIRS.length];
+        let r1 = pair[0][0], c1 = pair[0][1];
+        let r2 = pair[1][0], c2 = pair[1][1];
+        
+        let A = dctBlock[r1][c1];
+        let B = dctBlock[r2][c2];
+        
+        extractedBits.push(A > B ? 1 : 0);
     }
     
-    const magic = logicalBits.slice(0, 16);
+    // Recovery
+    let deinterleaved = deinterleave(extractedBits, PRNG_SEED);
+    
+    let voted = [];
+    let chunkSize = Math.floor(deinterleaved.length / REDUNDANCY);
+    for (let i = 0; i < chunkSize; i++) {
+        let votes = 0;
+        for (let r = 0; r < REDUNDANCY; r++) {
+            votes += deinterleaved[i + r * chunkSize];
+        }
+        voted.push(votes > Math.floor(REDUNDANCY / 2) ? 1 : 0);
+    }
+    
+    let payloadRaw = hammingDecode(voted);
+    
+    // Parsing Header
+    if (payloadRaw.length < 32) return "";
+    
+    let magic = payloadRaw.slice(0, 16);
     let magicMatch = true;
     for (let i = 0; i < 16; i++) {
-        if (magic[i] !== MAGIC_BITS[i]) {
-            magicMatch = false;
-            break;
-        }
+        if (magic[i] !== MAGIC_BITS[i]) magicMatch = false;
     }
-    
     if (!magicMatch) {
-        console.log("No watermark detected (magic marker mismatch)");
-        console.log("Expected:", MAGIC_BITS.join(''));
-        console.log("Got:     ", magic.join(''));
+        console.log("No watermark detected (magic marker mismatch v3)");
         return "";
     }
     
-    console.log("✅ Magic marker 'PK' found!");
+    console.log("✅ Magic marker 'PK' found (v3)!");
     
-    // Step 4: Read length header
-    const lengthBits = logicalBits.slice(16, 32);
+    let lengthBits = payloadRaw.slice(16, 32);
     let payloadLength = 0;
     for (let b of lengthBits) {
         payloadLength = (payloadLength << 1) | b;
     }
+    
     console.log(`Payload length: ${payloadLength} bits (${Math.floor(payloadLength / 8)} chars)`);
     
-    // Step 5: Extract payload
-    const totalNeeded = 32 + payloadLength;
-    let payloadBits;
-    if (logicalBits.length < totalNeeded) {
-        console.log("Warning: truncated payload");
-        payloadBits = logicalBits.slice(32);
-    } else {
-        payloadBits = logicalBits.slice(32, totalNeeded);
+    if (payloadRaw.length < 32 + payloadLength) {
+        console.log("Warning: truncated payload in v3");
+        return bitsToText(payloadRaw.slice(32));
     }
     
-    return bitsToText(payloadBits);
+    return bitsToText(payloadRaw.slice(32, 32 + payloadLength));
 }
 
 function compute2DDCT(input) {
-    // Separable 2D DCT using precomputed cosine table
     let temp = [];
     let output = [];
 
-    // 1D DCT on rows
     for (let i = 0; i < 8; i++) {
         temp[i] = [];
         for (let k = 0; k < 8; k++) {
             let sum = 0.0;
-            for (let n = 0; n < 8; n++) {
-                sum += input[i][n] * COS_TABLE[n][k];
-            }
+            for (let n = 0; n < 8; n++) sum += input[i][n] * COS_TABLE[n][k];
             let ck = (k === 0) ? C0 : 1.0;
             temp[i][k] = 0.5 * ck * sum;
         }
     }
 
-    // 1D DCT on columns
     for (let k = 0; k < 8; k++) {
         output[k] = [];
         for (let j = 0; j < 8; j++) {
             let sum = 0.0;
-            for (let n = 0; n < 8; n++) {
-                sum += temp[n][j] * COS_TABLE[n][k];
-            }
+            for (let n = 0; n < 8; n++) sum += temp[n][j] * COS_TABLE[n][k];
             let ck = (k === 0) ? C0 : 1.0;
             output[k][j] = 0.5 * ck * sum;
         }
