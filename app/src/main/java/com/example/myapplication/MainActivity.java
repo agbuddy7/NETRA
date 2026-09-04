@@ -5,6 +5,7 @@ import android.content.ContentValues;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -265,8 +266,11 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
-            runOnUiThread(() -> updateStatus("Generating Signature..."));
-            sendSignatureToDatabase(imageId, null);
+            runOnUiThread(() -> updateStatus("Generating Constellation Signature..."));
+            String constellationJson = extractAndSaveConstellation(watermarkedBitmap, imageId);
+
+            runOnUiThread(() -> updateStatus("Registering with Database..."));
+            sendSignatureToDatabase(imageId, constellationJson);
 
             Bitmap displayBitmap = createDisplayBitmap(imageUri);
 
@@ -373,7 +377,9 @@ public class MainActivity extends AppCompatActivity {
                 jsonBody.put("device_model", Build.MODEL);
                 jsonBody.put("timestamp", isoTimestamp);
                 // The column in Supabase is constellation_data
-                jsonBody.put("constellation_data", "proofKrypt-" + imageId);
+                jsonBody.put("constellation_data", (constellationJson != null && !constellationJson.isEmpty())
+                        ? constellationJson
+                        : ("proofKrypt-" + imageId));
 
                 String jsonInputString = jsonBody.toString();
 
@@ -402,6 +408,84 @@ public class MainActivity extends AppCompatActivity {
                 e.printStackTrace();
             }
         }).start();
+    }
+
+    private String extractAndSaveConstellation(Bitmap bitmap, long imageId) {
+        try {
+            long startTime = System.currentTimeMillis();
+            int width = bitmap.getWidth();
+            int height = bitmap.getHeight();
+
+            int gridSize = 8; // 8x8 Grid = 64 Stars (Resolution-Invariant)
+            float cellW = width / (float) gridSize;
+            float cellH = height / (float) gridSize;
+
+            StringBuilder jsonBuilder = new StringBuilder();
+            jsonBuilder.append("[\n");
+
+            for (int row = 0; row < gridSize; row++) {
+                for (int col = 0; col < gridSize; col++) {
+                    int startX = (int) (col * cellW);
+                    int startY = (int) (row * cellH);
+                    int w = (int) cellW;
+                    int h = (int) cellH;
+
+                    if (startX + w > width) w = width - startX;
+                    if (startY + h > height) h = height - startY;
+
+                    float maxVal = -1;
+                    int maxX = 0;
+                    int maxY = 0;
+
+                    // Fast block pixel extraction
+                    int[] cellPixels = new int[w * h];
+                    bitmap.getPixels(cellPixels, 0, w, startX, startY, w, h);
+
+                    for (int y = 0; y < h; y++) {
+                        int rowOffset = y * w;
+                        for (int x = 0; x < w; x++) {
+                            int pixel = cellPixels[rowOffset + x];
+                            float brightness = (0.299f * Color.red(pixel)) + (0.587f * Color.green(pixel)) + (0.114f * Color.blue(pixel));
+                            if (brightness > maxVal) {
+                                maxVal = brightness;
+                                maxX = x;
+                                maxY = y;
+                            }
+                        }
+                    }
+
+                    // Save Normalized Coordinates (0.0 to 1.0)
+                    float normX = (startX + maxX) / (float) width;
+                    float normY = (startY + maxY) / (float) height;
+                    float normB = maxVal / 255.0f;
+
+                    jsonBuilder.append(String.format(Locale.US, "  { \"row\": %d, \"col\": %d, \"x\": %.4f, \"y\": %.4f, \"b\": %.2f }", row, col, normX, normY, normB));
+
+                    if (row < gridSize - 1 || col < gridSize - 1) jsonBuilder.append(",\n");
+                    else jsonBuilder.append("\n");
+                }
+            }
+            jsonBuilder.append("]");
+
+            String finalJson = jsonBuilder.toString();
+
+            // Save locally to PhotoProvenance folder as constellation_[ID].json
+            File directory = new File(getExternalFilesDir(null), "PhotoProvenance");
+            if (!directory.exists()) directory.mkdirs();
+
+            File constFile = new File(directory, "constellation_" + imageId + ".json");
+            try (java.io.FileOutputStream fos = new java.io.FileOutputStream(constFile);
+                 java.io.OutputStreamWriter writer = new java.io.OutputStreamWriter(fos, java.nio.charset.StandardCharsets.UTF_8)) {
+                writer.write(finalJson);
+            }
+
+            long elapsed = System.currentTimeMillis() - startTime;
+            Log.d(TAG, "✓ Constellation Signature extracted and saved in " + elapsed + "ms: " + constFile.getAbsolutePath());
+            return finalJson;
+        } catch (Exception e) {
+            Log.e(TAG, "Error generating constellation", e);
+            return null;
+        }
     }
 
     private void updateStatus(String message) {

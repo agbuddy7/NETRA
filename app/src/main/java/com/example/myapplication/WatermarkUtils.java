@@ -210,16 +210,14 @@ public class WatermarkUtils {
                 }
             }
             
-            double[][] dctBlock = compute2DDCT(block);
-            double margin = getAdaptiveMargin(dctBlock);
-            
             int[][] pair = PAIRS[i % PAIRS.length];
             int r1 = pair[0][0], c1 = pair[0][1];
             int r2 = pair[1][0], c2 = pair[1][1];
             
-            double A = dctBlock[r1][c1];
-            double B = dctBlock[r2][c2];
-            double diff = A - B;
+            // 1. Luminance (Y) channel
+            double[][] dctBlock = compute2DDCT(block);
+            double margin = getAdaptiveMargin(dctBlock);
+            double diff = dctBlock[r1][c1] - dctBlock[r2][c2];
             
             if (bit == 1) {
                 if (diff < margin) {
@@ -234,15 +232,54 @@ public class WatermarkUtils {
                     dctBlock[r2][c2] += adjust;
                 }
             }
-            
             double[][] newBlock = compute2DIDCT(dctBlock);
+            
+            // 2. Chrominance Blue (Cb) channel (0.8x margin)
+            double[][] dctCb = compute2DDCT(cbBlock);
+            double marginCb = getAdaptiveMargin(dctCb) * 0.8;
+            double diffCb = dctCb[r1][c1] - dctCb[r2][c2];
+            
+            if (bit == 1) {
+                if (diffCb < marginCb) {
+                    double adjust = (marginCb - diffCb) / 2.0;
+                    dctCb[r1][c1] += adjust;
+                    dctCb[r2][c2] -= adjust;
+                }
+            } else {
+                if (diffCb > -marginCb) {
+                    double adjust = (diffCb - (-marginCb)) / 2.0;
+                    dctCb[r1][c1] -= adjust;
+                    dctCb[r2][c2] += adjust;
+                }
+            }
+            double[][] newCbBlock = compute2DIDCT(dctCb);
+            
+            // 3. Chrominance Red (Cr) channel (0.8x margin)
+            double[][] dctCr = compute2DDCT(crBlock);
+            double marginCr = getAdaptiveMargin(dctCr) * 0.8;
+            double diffCr = dctCr[r1][c1] - dctCr[r2][c2];
+            
+            if (bit == 1) {
+                if (diffCr < marginCr) {
+                    double adjust = (marginCr - diffCr) / 2.0;
+                    dctCr[r1][c1] += adjust;
+                    dctCr[r2][c2] -= adjust;
+                }
+            } else {
+                if (diffCr > -marginCr) {
+                    double adjust = (diffCr - (-marginCr)) / 2.0;
+                    dctCr[r1][c1] -= adjust;
+                    dctCr[r2][c2] += adjust;
+                }
+            }
+            double[][] newCrBlock = compute2DIDCT(dctCr);
             
             // Reconstruct RGB and write back to allPixels
             for (int r = 0; r < 8; r++) {
                 for (int c = 0; c < 8; c++) {
                     double y = newBlock[r][c];
-                    double cb = cbBlock[r][c] - 128.0;
-                    double cr = crBlock[r][c] - 128.0;
+                    double cb = newCbBlock[r][c] - 128.0;
+                    double cr = newCrBlock[r][c] - 128.0;
                     
                     int newR = clamp((int) Math.round(y + 1.402 * cr));
                     int newG = clamp((int) Math.round(y - 0.34414 * cb - 0.71414 * cr));
