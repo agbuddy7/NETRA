@@ -8,8 +8,22 @@ document.addEventListener('DOMContentLoaded', () => {
 function setupDropZones() {
     const imageDropZone = document.getElementById('imageDropZone');
     const imageInput = document.getElementById('imageInput');
+    const changePhotoBtn = document.getElementById('changePhotoBtn');
     
-    imageDropZone.addEventListener('click', () => imageInput.click());
+    imageDropZone.addEventListener('click', (e) => {
+        if (changePhotoBtn && (e.target === changePhotoBtn || changePhotoBtn.contains(e.target))) {
+            return;
+        }
+        imageInput.click();
+    });
+
+    if (changePhotoBtn) {
+        changePhotoBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            imageInput.click();
+        });
+    }
+
     imageDropZone.addEventListener('dragover', handleDragOver);
     imageDropZone.addEventListener('dragleave', (e) => e.currentTarget.classList.remove('active'));
     imageDropZone.addEventListener('drop', (e) => handleDrop(e, 'image'));
@@ -36,14 +50,31 @@ function handleFileSelect(e, type) {
 function processFile(file, type) {
     if (type === 'image') {
         if (!file.type.startsWith('image/')) {
-            showError('Please upload a valid image file');
+            showError('Please upload a valid image file (JPEG, PNG, WEBP)');
             return;
         }
         
         uploadedImage = file;
-        document.getElementById('imageInfo').textContent = `✓ ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
-        document.getElementById('imageInfo').classList.add('show');
+
+        // Show image thumbnail and hide upload placeholder
+        const thumb = document.getElementById('imageThumb');
+        const thumbContainer = document.getElementById('imageThumbContainer');
+        const placeholder = document.getElementById('uploadPlaceholder');
+        if (thumb) {
+            thumb.src = URL.createObjectURL(file);
+        }
+        if (thumbContainer) thumbContainer.style.display = 'flex';
+        if (placeholder) placeholder.style.display = 'none';
+
+        const imageInfo = document.getElementById('imageInfo');
+        if (imageInfo) {
+            imageInfo.textContent = `[FILE] ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+            imageInfo.classList.add('show');
+        }
+
         document.getElementById('verifyButton').disabled = false;
+        document.getElementById('errorMessage').style.display = 'none';
+        document.getElementById('resultContainer').style.display = 'none';
     }
 }
 
@@ -51,34 +82,49 @@ function setupVerifyButton() {
     document.getElementById('verifyButton').addEventListener('click', startVerification);
 }
 
+function setLoadingStatus(text) {
+    const el = document.getElementById('loadingStatus');
+    if (el) el.textContent = text;
+    const fallback = document.querySelector('#loading p');
+    if (fallback) fallback.textContent = text;
+}
+
 async function startVerification() {
     document.getElementById('errorMessage').style.display = 'none';
     document.getElementById('resultContainer').style.display = 'none';
     document.getElementById('loading').style.display = 'block';
+
+    const verifyBtn = document.getElementById('verifyButton');
+    if (verifyBtn) verifyBtn.disabled = true;
+    const btnSpinner = document.getElementById('btnSpinner');
+    if (btnSpinner) btnSpinner.style.display = 'inline-block';
     
     try {
         console.log('Starting verification...');
+        setLoadingStatus("Reading pixel matrix into canvas buffer...");
         
         // Load image to canvas
         const canvas = await loadImageToCanvas(uploadedImage);
         console.log('Image loaded:', canvas.width, 'x', canvas.height);
         
         // 1. Extract Geometric Constellation Signature (Resolution-Invariant 8x8 Grid)
+        setLoadingStatus("Computing 64-star Geometric Constellation...");
         let extractedConstellation = extractConstellation(canvas);
         console.log("Extracted 64-star constellation from uploaded image");
 
         // 2. Extract Invisible Watermark (if preserved)
+        setLoadingStatus("Extracting multi-channel Y+Cb+Cr DCT watermark...");
         let extractedPayload = await extractDCTWatermark(canvas);
         console.log("Extracted payload:", extractedPayload);
         
-        document.querySelector('#loading p').textContent = "Querying Global Database...";
+        setLoadingStatus("Querying NETRA Global Registry...");
         
         let isMatch = false;
         let dataToDisplay = null;
 
         // --- PATH A: Watermark Detected ---
         if (extractedPayload && extractedPayload.trim().length > 0) {
-            const rawId = extractedPayload.replace("proofKrypt-", "");
+            const rawId = extractedPayload.replace(/^proofKrypt-|^NETRA-/i, "");
             
             // Try query by image_id (ANDROID-[id]) or constellation_data
             const exactUrl = `https://zvddeaxqkygtppwvlycn.supabase.co/rest/v1/signatures?or=(image_id.eq.ANDROID-${encodeURIComponent(rawId)},constellation_data.eq.${encodeURIComponent(extractedPayload)})&select=*&limit=1`;
@@ -126,7 +172,7 @@ async function startVerification() {
             // Fuzzy Watermark Fallback (minor bit flips)
             if (!isMatch) {
                 console.log("Exact match failed, running Fuzzy Matching fallback...");
-                document.querySelector('#loading p').textContent = "Analyzing signature similarity...";
+                setLoadingStatus("Analyzing soft-decision signature similarity...");
                 
                 const candUrl = `https://zvddeaxqkygtppwvlycn.supabase.co/rest/v1/signatures?select=*&order=created_at.desc&limit=100`;
                 const candResponse = await fetch(candUrl, {
@@ -144,7 +190,7 @@ async function startVerification() {
                     let highestSim = 0;
 
                     for (const cand of candRows) {
-                        const refPayload = cand.image_id ? cand.image_id.replace("ANDROID-", "proofKrypt-") : cand.constellation_data;
+                        const refPayload = cand.image_id ? cand.image_id.replace(/^ANDROID-/, "proofKrypt-") : cand.constellation_data;
                         if (!refPayload) continue;
                         const sim = calculateSimilarity(extractedPayload, refPayload);
                         if (sim > highestSim) {
@@ -158,7 +204,7 @@ async function startVerification() {
                         dataToDisplay = {
                             matchType: 'fuzzy',
                             similarity: highestSim,
-                            registeredPayload: bestMatch.image_id ? bestMatch.image_id.replace("ANDROID-", "proofKrypt-") : bestMatch.constellation_data,
+                            registeredPayload: bestMatch.image_id ? bestMatch.image_id.replace(/^ANDROID-/, "proofKrypt-") : bestMatch.constellation_data,
                             metadata: {
                                 author: bestMatch.author,
                                 device: bestMatch.device_model,
@@ -176,7 +222,7 @@ async function startVerification() {
         // --- PATH B: Watermark Missing (Social Media Resizing / Cropping) -> Geometric Constellation Fallback ---
         if (!isMatch) {
             console.log("No watermark detected or matched. Running Geometric Constellation search...");
-            document.querySelector('#loading p').textContent = "Watermark missing (likely resized). Checking Geometric Constellation...";
+            setLoadingStatus("Watermark stripped by resizing. Checking Geometric Constellations...");
 
             const candUrl = `https://zvddeaxqkygtppwvlycn.supabase.co/rest/v1/signatures?select=*&order=created_at.desc&limit=100`;
             const candResponse = await fetch(candUrl, {
@@ -237,7 +283,11 @@ async function startVerification() {
         showError('Verification failed: ' + error.message);
     } finally {
         document.getElementById('loading').style.display = 'none';
-        document.querySelector('#loading p').textContent = "Extracting invisible watermark...";
+        const verifyBtn = document.getElementById('verifyButton');
+        if (verifyBtn) verifyBtn.disabled = false;
+        const btnSpinner = document.getElementById('btnSpinner');
+        if (btnSpinner) btnSpinner.style.display = 'none';
+        setLoadingStatus("Extracting invisible watermark...");
     }
 }
 
@@ -686,11 +736,23 @@ function calculateSimilarity(str1, str2) {
     return Math.max(0, 1 - (distance / maxLen));
 }
 
+function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 function displayResults(isMatch, extractedPayload, dbData) {
-    document.getElementById('resultContainer').style.display = 'block';
+    const resultContainer = document.getElementById('resultContainer');
+    resultContainer.style.display = 'block';
+    resultContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     
     const pf = document.getElementById('progressFill');
-    const resultIcon = document.getElementById('resultIcon');
+    const resultBadge = document.getElementById('resultBadge');
     const resultTitle = document.getElementById('resultTitle');
     const resultSubtitle = document.getElementById('resultSubtitle');
 
@@ -698,68 +760,114 @@ function displayResults(isMatch, extractedPayload, dbData) {
         if (dbData && dbData.matchType === 'constellation') {
             const pct = Math.round((dbData.similarity || 0.8) * 100);
             pf.style.width = `${pct}%`;
-            pf.textContent = `${pct}% Landmark Match`;
-            pf.style.background = 'linear-gradient(90deg, #9C27B0 0%, #2196F3 100%)';
-            resultIcon.textContent = '✨';
-            resultTitle.textContent = `Authentic Image - Constellation Match (${pct}%)`;
-            resultSubtitle.textContent = 'Watermark was stripped (social media downscaling/resizing), but the 64-star Geometric Constellation verifies this image is authentic!';
+            pf.textContent = `${pct}% CONSTELLATION MATCH`;
+            pf.style.background = 'repeating-linear-gradient(-45deg, #000000, #000000 8px, #333333 8px, #333333 16px)';
+            if (resultBadge) {
+                resultBadge.textContent = 'STATUS: VERIFIED (CONSTELLATION)';
+                resultBadge.className = 'status-badge';
+            }
+            resultTitle.textContent = `AUTHENTIC IMAGE — CONSTELLATION MATCH (${pct}%)`;
+            resultSubtitle.textContent = 'Watermark was stripped by resizing, but the 64-star Geometric Constellation verifies this image as authentic.';
         } else if (dbData && dbData.matchType === 'fuzzy') {
             const pct = Math.round((dbData.similarity || 0.85) * 100);
             pf.style.width = `${pct}%`;
-            pf.textContent = `${pct}% Match`;
-            pf.style.background = 'linear-gradient(90deg, #FF9800 0%, #4CAF50 100%)';
-            resultIcon.textContent = '🛡️';
-            resultTitle.textContent = `Authentic Image - High Confidence (${pct}%)`;
-            resultSubtitle.textContent = 'Verified match found with minor JPEG compression / transmission noise.';
+            pf.textContent = `${pct}% MATCH`;
+            pf.style.background = 'repeating-linear-gradient(-45deg, #000000, #000000 8px, #333333 8px, #333333 16px)';
+            if (resultBadge) {
+                resultBadge.textContent = 'STATUS: VERIFIED (SOFT-DECISION)';
+                resultBadge.className = 'status-badge';
+            }
+            resultTitle.textContent = `AUTHENTIC IMAGE — HIGH CONFIDENCE (${pct}%)`;
+            resultSubtitle.textContent = 'Cryptographic watermark verified with minor JPEG compression / channel noise resilience.';
         } else {
             pf.style.width = '100%';
-            pf.textContent = '100% Match';
-            pf.style.background = 'linear-gradient(90deg, #4CAF50 0%, #8BC34A 100%)';
-            resultIcon.textContent = '✅';
-            resultTitle.textContent = 'Authentic Image - Exact Match Found';
-            resultSubtitle.textContent = 'This image is registered in the global provenance database.';
+            pf.textContent = '100% MATCH';
+            pf.style.background = 'repeating-linear-gradient(-45deg, #000000, #000000 8px, #333333 8px, #333333 16px)';
+            if (resultBadge) {
+                resultBadge.textContent = 'STATUS: VERIFIED';
+                resultBadge.className = 'status-badge';
+            }
+            resultTitle.textContent = 'AUTHENTIC IMAGE — EXACT MATCH FOUND';
+            resultSubtitle.textContent = 'This image is officially registered in the NETRA global provenance registry.';
         }
     } else {
         pf.style.width = '0%';
         pf.textContent = '0%';
-        pf.style.background = 'linear-gradient(90deg, #F44336 0%, #E91E63 100%)';
-        resultIcon.textContent = '❌';
-        resultTitle.textContent = 'Unregistered or Modified';
-        resultSubtitle.textContent = 'Neither the invisible watermark nor the geometric constellation matched any registered image.';
+        pf.style.background = '#000000';
+        if (resultBadge) {
+            resultBadge.textContent = 'STATUS: UNREGISTERED / MODIFIED';
+            resultBadge.className = 'status-badge unregistered';
+        }
+        resultTitle.textContent = 'UNREGISTERED OR MODIFIED';
+        resultSubtitle.textContent = 'Neither the invisible frequency watermark nor the geometric constellation matched any registered signature.';
     }
     
     let dbDetails = '';
     if (isMatch && dbData && dbData.metadata) {
+        let methodText = 'Frequency Watermark (Multi-channel Y+Cb+Cr DCT)';
         let integrityBadge = '';
+
         if (dbData.matchType === 'constellation') {
-            integrityBadge = `<p style="margin: 5px 0; color: #BA68C8;"><strong>Verification Method:</strong> Geometric Constellation Landmark Hashing (Resolution-Invariant)</p>
-               <p style="margin: 5px 0; color: #4CAF50;"><strong>Constellation Match:</strong> ${Math.round(dbData.similarity * 100)}% (Avg Drift: ${(dbData.avgDistance * 100).toFixed(1)}%)</p>`;
+            methodText = 'Geometric Constellation (64-Star Resolution-Invariant Hash)';
+            integrityBadge = `
+                <div class="meta-row">
+                    <span class="meta-label">Match Metric</span>
+                    <span class="meta-value">${Math.round(dbData.similarity * 100)}% Match (Avg Drift: ${(dbData.avgDistance * 100).toFixed(1)}%)</span>
+                </div>
+            `;
         } else if (dbData.matchType === 'fuzzy') {
-            integrityBadge = `<p style="margin: 5px 0; color: #FFB300;"><strong>Signal Integrity:</strong> ${Math.round(dbData.similarity * 100)}% (Compression noise detected)</p>
-               <p style="margin: 5px 0; color: #aaa; font-size: 0.85em;"><strong>Registered Signature:</strong> <span style="color:#4CAF50; font-family: monospace;">${dbData.registeredPayload}</span></p>`;
+            integrityBadge = `
+                <div class="meta-row">
+                    <span class="meta-label">Signal Integrity</span>
+                    <span class="meta-value">${Math.round(dbData.similarity * 100)}% (Soft-Averaging Recovered)</span>
+                </div>
+            `;
         } else {
             const constellText = (dbData.constellationScore !== null) 
-                ? ` + Constellation Integrity: ${Math.round(dbData.constellationScore)}%`
+                ? ` [Constellation: ${Math.round(dbData.constellationScore)}%]`
                 : '';
-            integrityBadge = `<p style="margin: 5px 0; color: #4CAF50;"><strong>Signal Integrity:</strong> 100% Lossless Watermark${constellText}</p>`;
+            integrityBadge = `
+                <div class="meta-row">
+                    <span class="meta-label">Signal Integrity</span>
+                    <span class="meta-value">100% Lossless Watermark${constellText}</span>
+                </div>
+            `;
         }
 
         dbDetails = `
-            ${integrityBadge}
-            <p style="margin: 5px 0; color: #4CAF50;"><strong>Verified Author:</strong> ${dbData.metadata.author || 'Unknown'}</p>
-            <p style="margin: 5px 0; color: #4CAF50;"><strong>Device:</strong> ${dbData.metadata.device || 'Unknown'}</p>
-            <p style="margin: 5px 0; color: #4CAF50;"><strong>Timestamp:</strong> ${dbData.metadata.original_timestamp || 'Unknown'}</p>
-            <p style="margin: 5px 0; color: #aaa; font-size: 0.85em;"><strong>Image ID:</strong> ${dbData.metadata.image_id || 'Unknown'}</p>
+            <div class="metadata-table">
+                <div class="meta-row">
+                    <span class="meta-label">Verification Method</span>
+                    <span class="meta-value">${methodText}</span>
+                </div>
+                ${integrityBadge}
+                <div class="meta-row">
+                    <span class="meta-label">Verified Author</span>
+                    <span class="meta-value">${escapeHtml(dbData.metadata.author || 'Unknown')}</span>
+                </div>
+                <div class="meta-row">
+                    <span class="meta-label">Hardware Device</span>
+                    <span class="meta-value">${escapeHtml(dbData.metadata.device || 'Unknown')}</span>
+                </div>
+                <div class="meta-row">
+                    <span class="meta-label">Timestamp</span>
+                    <span class="meta-value">${escapeHtml(dbData.metadata.original_timestamp || 'Unknown')}</span>
+                </div>
+                <div class="meta-row">
+                    <span class="meta-label">Registered ID</span>
+                    <span class="meta-value">${escapeHtml(dbData.metadata.image_id || 'Unknown')}</span>
+                </div>
+            </div>
         `;
     }
     
+    const payloadDisplay = extractedPayload || "[Watermark stripped by resizing / compression — Constellation Active]";
+
     const detailsHtml = `
-        <div style="margin-top: 15px; text-align: left; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px;">
-            <p style="margin: 5px 0; color: #aaa; font-size: 0.9em;">Extracted Payload / Landmark Status:</p>
-            <p style="margin: 5px 0; color: white; font-family: monospace; word-break: break-all;">${extractedPayload || "[Watermark stripped by resizing - Constellation active]"}</p>
-            <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px;">
-                ${dbDetails}
-            </div>
+        <div class="diagnostics-box">
+            <div class="diag-header">Extracted Cryptographic Payload / Landmark Status</div>
+            <div class="payload-pill">${escapeHtml(payloadDisplay)}</div>
+            ${dbDetails}
         </div>
     `;
     
@@ -770,6 +878,8 @@ function displayResults(isMatch, extractedPayload, dbData) {
 }
 
 function showError(msg) {
-    document.getElementById('errorMessage').textContent = '⚠️ ' + msg;
-    document.getElementById('errorMessage').style.display = 'block';
+    const errorBox = document.getElementById('errorMessage');
+    errorBox.textContent = 'ERROR: ' + msg;
+    errorBox.style.display = 'block';
+    errorBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
